@@ -1,5 +1,5 @@
 """
-reCOGnize - a tool for functional annotation with COGs
+reCOGnizer - a tool for functional annotation with COGs
 
 By João Sequeira
 
