@@ -11,8 +11,8 @@ from time import gmtime, strftime
 import argparse, shutil, os, multiprocessing, glob, subprocess
 
 def get_arguments():    
-    parser = argparse.ArgumentParser(description="Multi Omics Software for Community Analysis",
-        epilog="A tool for performing metagenomics, metatranscriptomics and metaproteomics analysis.")
+    parser = argparse.ArgumentParser(description="reCOGnizer - a tool for domain based annotation with the COG database",
+        epilog="Input file must be specified.")
     parser.add_argument("-f", "--file", type = str, nargs = '*', required = True,
                         help="Fasta file with protein sequences for annotation")
     parser.add_argument("-t", "--threads", type = str, 
@@ -61,10 +61,10 @@ Output:
 def run_rpsblast(fasta, output, cog, threads = '0', max_target_seqs = '1'):
     bashCommand = 'rpsblast -query {} -db "{}" -out {} -outfmt 6 -num_threads {} -max_target_seqs {}'.format(
             fasta, cog, output, threads, max_target_seqs)
-    open('/Databases/command.bash', 'w').write(bashCommand + '\n') # subprocess was not handling well running this command, so an intermediate file is written with the command to run
+    open('Databases/command.bash', 'w').write(bashCommand + '\n') # subprocess was not handling well running this command, so an intermediate file is written with the command to run
     print(bashCommand)
-    run_command('bash /Databases/command.bash', print_command = False)
-    os.remove('/Databases/command.bash')
+    run_command('bash Databases/command.bash', print_command = False)
+    os.remove('Databases/command.bash')
     
 '''
 Input: 
@@ -81,7 +81,7 @@ def annotate_cogs(blast, output, cddid, fun, whog):
     if os.path.isdir(os.getcwd() + '/results'):                                 # the cdd2cog tool does not overwrite, and fails if results directory already exists
         print('Eliminating ' + os.getcwd() + '/results')
         shutil.rmtree(os.getcwd() + '/results', ignore_errors=True)             # is not necessary when running the tool once, but better safe then sorry!
-    run_command('perl /reCOGnizer/cdd2cog.pl -r {} -c {} -f {} -w {}'.format(
+    run_command('perl reCOGnizer/cdd2cog.pl -r {} -c {} -f {} -w {}'.format(
             blast, cddid, fun, whog))
     if os.path.isdir(output + '/results'):
         shutil.rmtree(output + '/results')
@@ -109,7 +109,7 @@ Output:
     returns pandas.DataFrame with the functional categories intrisic levels 
     reorganized into corresponding columns
 '''      
-def organize_cdd_blast(cogblast, fun = '/Databases/fun.txt'):
+def organize_cdd_blast(cogblast, fun = 'Databases/fun.txt'):
     cogblast = parse_cogblast(cogblast)
     cogblast = cogblast[cogblast['functional categories'].notnull()]
     cog_relation = parse_fun(fun)
@@ -153,8 +153,8 @@ Output:
     search
 '''
 def create_split_cog_db(smp_directory, output, threads = '6', step = None):
-    dbs = (open('/Databases/databases.txt').read().split('\n') if
-    os.path.isfile('/Databases/databases.txt') else list())
+    dbs = (open('Databases/databases.txt').read().split('\n') if
+    os.path.isfile('Databases/databases.txt') else list())
     if threads in dbs:
         print('Already built COG database for [' + threads + '] threads.')
     else:
@@ -197,10 +197,10 @@ def main():
     
     # create database if it doesn't exit
     timed_message('Checking if database exists for {} threads.'.format(args.threads))
-    create_split_cog_db('/Databases', args.output, args.threads)
+    create_split_cog_db('Databases', args.output, args.threads)
     
     # set database(s)
-    databases = [pn.split('.pn')[0] for pn in glob.glob('/Databases/Cog_' + args.threads + '_*.pn')]
+    databases = [pn.split('.pn')[0] for pn in glob.glob('Databases/Cog_' + args.threads + '_*.pn')]
     
     # run annotation with psi-blast and COG database
     timed_message('Running annotation with PSI-BLAST and COG database as reference.')
@@ -210,7 +210,7 @@ def main():
     # convert CDD IDs to COGs
     timed_message('Converting CDD IDs to respective COG IDs.')
     annotate_cogs(args.output + '/cdd_aligned.blast', args.output, 
-        '/Databases/cddid.tbl', '/Databases/fun.txt', '/Databases/whog')
+        'Databases/cddid.tbl', 'Databases/fun.txt', 'Databases/whog')
     
     # organize the results from cdd2cog and write protein COG assignment
     timed_message('Retrieving COG categories from COGs.')
