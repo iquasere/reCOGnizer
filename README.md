@@ -19,6 +19,27 @@ sudo reCOGnizer/install.bash
 ## Usage
 
 reCOGnizer needs an input file, but that is all it needs!
+```
+usage: recognizer.py [-h] -f [FILE [FILE ...]] [-t THREADS] [-o OUTPUT]
+                     [-db DATABASE] [-seqs MAX_TARGET_SEQS]
+
+reCOGnizer - a tool for domain based annotation with the COG database
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -f [FILE [FILE ...]], --file [FILE [FILE ...]]
+                        Fasta file with protein sequences for annotation
+  -t THREADS, --threads THREADS
+                        Number of threads for reCOGnizer to use. Default is
+                        number of CPUs available minus 2.
+  -o OUTPUT, --output OUTPUT
+                        Output directory
+  -db DATABASE, --database DATABASE
+                        Basename of COG database for annotation
+  -seqs MAX_TARGET_SEQS, --max-target-seqs MAX_TARGET_SEQS
+                        Number of maximum identifications for each protein.
+                        Default is 1.
+```
 
 ## Docker
 

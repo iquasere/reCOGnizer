@@ -172,6 +172,7 @@ def create_split_cog_db(smp_directory, output, threads = '6', step = None):
         open(output + str(int(i / step)) + '.pn', 'w').write('\n'.join(smp_list[i:len(smp_list)]))
         pn_files.append(output + str(int(i / step)) + '.pn')
         for file in pn_files:
+            print(pn_files)
             run_command('makeprofiledb -in {1} -title {2} -out {2}'.format(     # -title and -out options are defaulted as input file name to -in argument; -dbtype default is 'rps'
                     file, file.split('.pn')[0]))
         open('/Databases/databases.txt','w').write('\n'.join(dbs + [threads]))
