@@ -46,5 +46,5 @@ optional arguments:
 reCOGnizer already has its own image! To use it, just pull the image and run it!.
 ```
 docker pull iquasere/recognizer:latest
-docker run iquasere/recognizer [arguments]
+docker run -t iquasere/recognizer [arguments]
 ```

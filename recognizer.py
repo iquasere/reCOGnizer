@@ -13,7 +13,7 @@ import argparse, shutil, os, multiprocessing, glob, subprocess
 def get_arguments():    
     parser = argparse.ArgumentParser(description="reCOGnizer - a tool for domain based annotation with the COG database",
         epilog="Input file must be specified.")
-    parser.add_argument("-f", "--file", type = str, nargs = '*', required = True,
+    parser.add_argument("-f", "--file", type = str, required = True,
                         help="Fasta file with protein sequences for annotation")
     parser.add_argument("-t", "--threads", type = str, 
                         default = str(multiprocessing.cpu_count() - 2),
