@@ -209,7 +209,7 @@ def main():
     
     # get arguments
     args = get_arguments()
-    '''
+    
     # create database if it doesn't exit
     timed_message('Checking if database exists for {} threads.'.format(args.threads))
     create_split_cog_db('Databases', args.output_databases + '/COG', args.threads)
@@ -227,7 +227,7 @@ def main():
     timed_message('Converting CDD IDs to respective COG IDs.')
     annotate_cogs(args.output + '/cdd_aligned.blast', args.output, 
         'Databases/cddid.tbl', 'Databases/fun.txt', 'Databases/whog')
-    '''
+    
     # organize the results from cdd2cog and write protein COG assignment
     timed_message('Retrieving COG categories from COGs.')
     cogblast = organize_cdd_blast(args.output + '/results/rps-blast_cog.txt')
