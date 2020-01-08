@@ -8,7 +8,7 @@ Nov 2019
 
 import pandas as pd
 from time import gmtime, strftime
-import argparse, shutil, os, multiprocessing, glob, subprocess
+import argparse, shutil, os, multiprocessing, glob, subprocess, pathlib
 
 def get_arguments():    
     parser = argparse.ArgumentParser(description="reCOGnizer - a tool for domain based annotation with the COG database",
@@ -20,14 +20,26 @@ def get_arguments():
                         help = """Number of threads for reCOGnizer to use. 
                         Default is number of CPUs available minus 2.""")
     parser.add_argument("-o", "--output", type = str, help = "Output directory",
-                        default = os.getcwd())
-    parser.add_argument("-db", "--database", type = str,
+                        default = 'reCOGnizer_results'),
+    parser.add_argument("-odb", "--output-databases", type = str, 
+                        help = "Output directory for storing COG databases",
+                        default = 'Databases')
+    parser.add_argument("-db", "--database", type = str,                        # TODO - Add option to use already existing database by inputing its preffix as argument
                         help = "Basename of COG database for annotation")
     parser.add_argument("-seqs", "--max-target-seqs", type = str,
                         help="""Number of maximum identifications for each protein.
                         Default is 1.""", default = "1")
 
-    return parser.parse_args()
+    args = parser.parse_args()
+    
+    args.output = args.output.rstrip('/'); args.output_databases = args.output_databases.rstrip('/'); 
+
+    for directory in [args.output, args.output_databases]:
+        if not os.path.isdir(directory):
+            pathlib.Path(directory).mkdir(parents=True, exist_ok=True)
+            print('Created ' + directory)
+
+    return args
 
 '''
 Input:
@@ -46,6 +58,8 @@ Output:
     command will be run... hopefully
 '''
 def run_command(bashCommand, print_command = True):
+    if print_command:
+        print(bashCommand)
     subprocess.run(bashCommand.split())
     
 '''
@@ -153,8 +167,9 @@ Output:
     search
 '''
 def create_split_cog_db(smp_directory, output, threads = '6', step = None):
-    dbs = (open('Databases/databases.txt').read().split('\n') if
-    os.path.isfile('Databases/databases.txt') else list())
+    database_reporter = '/'.join(output.split('/')[:-1]) + '/databases.txt'
+    dbs = (open(database_reporter).read().split('\n') if
+    os.path.isfile(database_reporter) else list())
     if threads in dbs:
         print('Already built COG database for [' + threads + '] threads.')
     else:
@@ -174,7 +189,7 @@ def create_split_cog_db(smp_directory, output, threads = '6', step = None):
         for file in pn_files:
             run_command('makeprofiledb -in {0} -title {1} -out {1}'.format(     # -title and -out options are defaulted as input file name to -in argument; -dbtype default is 'rps'
                     file, file.split('.pn')[0]))
-        open('/Databases/databases.txt','w').write('\n'.join(dbs + [threads]))
+        open(database_reporter,'w').write('\n'.join(dbs + [threads]))
         
 '''
 Input:
@@ -197,11 +212,12 @@ def main():
     
     # create database if it doesn't exit
     timed_message('Checking if database exists for {} threads.'.format(args.threads))
-    create_split_cog_db('Databases', args.output, args.threads)
+    create_split_cog_db('Databases', args.output_databases + '/COG', args.threads)
     
     # set database(s)
-    databases = [pn.split('.pn')[0] for pn in glob.glob('Databases/Cog_' + args.threads + '_*.pn')]
-    
+    databases = [pn.split('.pn')[0] for pn in glob.glob('{}/COG_{}_*.pn'.format(
+            args.output_databases, args.threads))]
+            
     # run annotation with psi-blast and COG database
     timed_message('Running annotation with PSI-BLAST and COG database as reference.')
     run_rpsblast(args.file, args.output + '/cdd_aligned.blast', ' '.join(databases),
