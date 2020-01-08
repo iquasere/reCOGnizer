@@ -49,7 +49,7 @@ recognizer.py -f input_file.fasta -o output_folder
 
 ## Docker
 
-reCOGnizer already has its own image! To use it, just pull the image and run it!.
+reCOGnizer already has its own image! To use it, just pull the image and run it!
 ```
 docker pull iquasere/recognizer:latest
 docker run -it -v absolute/path/to/fasta_folder:/input_folder /absolute/path/to/output_folder:/output_folder --rm iquasere/recognizer -f /input_folder/input_file.fasta -o /output_folder [other arguments]
