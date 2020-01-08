@@ -11,6 +11,11 @@ RUN buildDeps='build-essential zlib1g-dev' \
 && conda install -c anaconda pandas \
 && conda install -c bioconda blast \
 && conda install -c anaconda lxml \
+&& conda install -c anaconda openpyxl \
+&& git clone https://github.com/marbl/Krona.git \
+&& cd Krona/KronaTools/ \
+&& perl install.pl \
+&& cd .. \
 && wget https://github.com/aleimba/bac-genomics-scripts/raw/master/cdd2cog/cdd2cog.pl -P /reCOGnizer \
 && mkdir /Databases \
 && cd /Databases \

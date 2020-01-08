@@ -99,7 +99,7 @@ def annotate_cogs(blast, output, cddid, fun, whog):
             blast, cddid, fun, whog))
     if os.path.isdir(output + '/results'):
         shutil.rmtree(output + '/results')
-    os.rename('results', output + '/results')
+    shutil.copytree('results', output + '/results')
     
 '''
 Input: 
@@ -209,7 +209,7 @@ def main():
     
     # get arguments
     args = get_arguments()
-    
+    '''
     # create database if it doesn't exit
     timed_message('Checking if database exists for {} threads.'.format(args.threads))
     create_split_cog_db('Databases', args.output_databases + '/COG', args.threads)
@@ -227,22 +227,26 @@ def main():
     timed_message('Converting CDD IDs to respective COG IDs.')
     annotate_cogs(args.output + '/cdd_aligned.blast', args.output, 
         'Databases/cddid.tbl', 'Databases/fun.txt', 'Databases/whog')
-    
+    '''
     # organize the results from cdd2cog and write protein COG assignment
     timed_message('Retrieving COG categories from COGs.')
     cogblast = organize_cdd_blast(args.output + '/results/rps-blast_cog.txt')
-    cogblast.to_excel(args.output + '/protein2cog.xlsx')
+    cogblast[['qseqid'] + cogblast.columns.tolist()[:-1]].to_excel(
+            args.output + '/protein2cog.xlsx', index = False)
     
     # quantify COG categories
     timed_message('Quantifying COG categories.')
     del cogblast['qseqid']
     cogblast = cogblast.groupby(cogblast.columns.tolist()).size().reset_index().rename(columns={0:'count'})
-    cogblast.to_csv(args.output + '/cog_quantification.tsv', sep = '\t', index = False)
+    cogblast.to_excel(args.output + '/cog_quantification.xlsx', index = False)
     timed_message('COG categories quantification is available at {}.'.format(
             args.output + '/cog_quantification.tsv'))
     
     # represent that quantification in krona plot
     timed_message('Creating Krona plot representation.')
+    cogblast[['count'] + cogblast.columns.tolist()[:-1]].to_csv(
+            args.output + '/cog_quantification.tsv', index = False, 
+            header = False, sep = '\t')
     create_krona_plot(args.output + '/cog_quantification.tsv')
             
 if __name__ == '__main__':
