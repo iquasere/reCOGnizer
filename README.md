@@ -38,7 +38,8 @@ optional arguments:
                         Number of maximum identifications for each protein.
                         Default is 1.
 ```
-The simplest way to run reCOGnizer just needs the specification of the fasta file and an output directory
+
+The simplest way to run reCOGnizer is to just specify the fasta filename and an output directory
 ```
 recognizer.py -f input_file.fasta -o output_folder
 ```
