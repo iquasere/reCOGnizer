@@ -8,7 +8,7 @@ Nov 2019
 
 import pandas as pd
 from time import gmtime, strftime
-import argparse, shutil, os, multiprocessing, glob, subprocess, pathlib
+import argparse, shutil, sys, os, multiprocessing, glob, subprocess, pathlib
 
 def get_arguments():    
     parser = argparse.ArgumentParser(description="reCOGnizer - a tool for domain based annotation with the COG database",
@@ -23,16 +23,20 @@ def get_arguments():
                         default = 'reCOGnizer_results'),
     parser.add_argument("-odb", "--output-databases", type = str, 
                         help = "Output directory for storing COG databases",
-                        default = 'Databases')
-    parser.add_argument("-db", "--database", type = str,                        # TODO - Add option to use already existing database by inputing its preffix as argument
-                        help = "Basename of COG database for annotation")
+                        default = sys.path[0] + '/Databases')
+    parser.add_argument("-db", "--database", type = str,
+                        help = """Basename of COG database for annotation. 
+                        If multiple databases, use comma separated list (db1,db2,db3)""")
+    parser.add_argument("--database-by-recognizer", type = str,
+                        help = "If inputed database was produced by reCOGnizer")
     parser.add_argument("-seqs", "--max-target-seqs", type = str,
                         help="""Number of maximum identifications for each protein.
                         Default is 1.""", default = "1")
 
     args = parser.parse_args()
     
-    args.output = args.output.rstrip('/'); args.output_databases = args.output_databases.rstrip('/'); 
+    args.output = args.output.rstrip('/')
+    args.output_databases = args.output_databases.rstrip('/')
 
     for directory in [args.output, args.output_databases]:
         if not os.path.isdir(directory):
@@ -100,7 +104,7 @@ def annotate_cogs(blast, output, cddid, fun, whog):
     if os.path.isdir(output + '/results'):
         shutil.rmtree(output + '/results')
     shutil.copytree('results', output + '/results')
-    
+
 '''
 Input: 
     name of cddblast to parse
@@ -192,6 +196,19 @@ def create_split_cog_db(smp_directory, output, threads = '6', step = None):
         open(database_reporter,'w').write('\n'.join(dbs + [threads]))
         
 '''
+intput: 
+    database: str - database basename
+output:
+    boolean - True if it seems a valid database, false otherwise
+'''
+def validate_database(database):
+    for ext in ['aux','freq','loo','phr','pin','pn','psd','psi','psq','rps']:
+        if not os.path.isfile('{}.{}'.format(database, ext)):
+            return False
+    return True
+    
+        
+'''
 Input:
     tsv: filename of TSV file to be inputed. Must have the format 
     value\tcategorie1\tcategorie2\t..., with no header
@@ -210,13 +227,24 @@ def main():
     # get arguments
     args = get_arguments()
     
-    # create database if it doesn't exit
-    timed_message('Checking if database exists for {} threads.'.format(args.threads))
-    create_split_cog_db('Databases', args.output_databases + '/COG', args.threads)
+    if args.database:
+        if args.database_by_recognizer:                                         # if database was built by reCOGnizer
+            args.threads = int(args.database.split('_')[-1])
+            databases = [args.database + '_' + i for i in range(args.threads)]
+        else:
+            databases = args.database.split(',')
+        for database in databases:
+            if not validate_database(args.database):
+                print('Database not valid!')
+                exit()
+    else:
+        # create database if it doesn't exit
+        timed_message('Checking if database exists for {} threads.'.format(args.threads))
+        create_split_cog_db('Databases', args.output_databases + '/COG', args.threads)
     
-    # set database(s)
-    databases = [pn.split('.pn')[0] for pn in glob.glob('{}/COG_{}_*.pn'.format(
-            args.output_databases, args.threads))]
+        # set database(s)
+        databases = [pn.split('.pn')[0] for pn in glob.glob('{}/COG_{}_*.pn'.format(
+                args.output_databases, args.threads))]
             
     # run annotation with psi-blast and COG database
     timed_message('Running annotation with PSI-BLAST and COG database as reference.')
