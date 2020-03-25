@@ -67,6 +67,13 @@ def run_command(bashCommand, print_command = True):
     subprocess.run(bashCommand.split())
     
 '''
+Input:
+Output:
+'''
+def download_resources(database_directory):
+    run_command('bash download_resources.bash {}'.format(database_directory))
+    
+'''
 Input: 
     fasta: str - name of a fasta file of proteins to be annotated
     output: str - filename of rps_blast to be created
@@ -220,7 +227,7 @@ Output:
 def create_krona_plot(tsv, output = None):
     if output is None:
         output = tsv.replace('.tsv','.html')
-    run_command('ktImportText {} -o {}'.format(tsv, output))
+    run_command('perl Krona/KronaTools/scripts/ImportText.pl {} -o {}'.format(tsv, output))
         
 def main():
     
@@ -238,6 +245,12 @@ def main():
                 print('Database not valid!')
                 exit()
     else:
+        # check if necessary files exist to build database
+        for file in ['cddid.tbl', 'fun.txt', 'whog']:
+            if not os.path.isfile('{}/Databases/{}'.format(sys.path[0], file)):
+                print('{}/Databases/{} not found!'.format(sys.path[0], file))
+                download_resources('{}/Databases'.format(sys.path[0]))
+        
         # create database if it doesn't exit
         timed_message('Checking if database exists for {} threads.'.format(args.threads))
         create_split_cog_db('Databases', args.output_databases + '/COG', args.threads)

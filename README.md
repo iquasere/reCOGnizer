@@ -4,7 +4,7 @@ A tool for domain based annotation with the COG database.
 
 ## Features
 
-reCOGnizer is a user-friendly implementation of protein functional identification using COG database. It builds a splitted version of the COG database with which PSI-BLAST can run in multithread, significantly speeding the time intensive step of protein annotation. After COG assignment to proteins, reCOGnizer makes use of cdd2cog to convert CDD IDs to their respective COGs, before organizing those COGs into a relational table of protein to COG, with the inclusion of the three levels of functional classification from COG.
+reCOGnizer is a user-friendly implementation of protein functional identification using COG database. It builds a splitted version of the COG database with which RPS-BLAST can run in multithread, significantly speeding the time intensive step of protein annotation. After COG assignment to proteins, reCOGnizer makes use of cdd2cog to convert CDD IDs to their respective COGs, before organizing those COGs into a relational table of protein to COG, with the inclusion of the three levels of functional classification from COG.
 
 ## Installation
 
@@ -18,22 +18,23 @@ sudo reCOGnizer/install.bash
 
 reCOGnizer needs an input file, but that is all it needs!
 ```
-usage: recognizer.py [-h] -f [FILE [FILE ...]] [-t THREADS] [-o OUTPUT]
-                     [-db DATABASE] [-seqs MAX_TARGET_SEQS]
-
 reCOGnizer - a tool for domain based annotation with the COG database
 
 optional arguments:
   -h, --help            show this help message and exit
-  -f [FILE [FILE ...]], --file [FILE [FILE ...]]
-                        Fasta file with protein sequences for annotation
+  -f FILE, --file FILE  Fasta file with protein sequences for annotation
   -t THREADS, --threads THREADS
                         Number of threads for reCOGnizer to use. Default is
                         number of CPUs available minus 2.
   -o OUTPUT, --output OUTPUT
                         Output directory
+  -odb OUTPUT_DATABASES, --output-databases OUTPUT_DATABASES
+                        Output directory for storing COG databases
   -db DATABASE, --database DATABASE
-                        Basename of COG database for annotation
+                        Basename of COG database for annotation. If multiple
+                        databases, use comma separated list (db1,db2,db3)
+  --database-by-recognizer DATABASE_BY_RECOGNIZER
+                        If inputed database was produced by reCOGnizer
   -seqs MAX_TARGET_SEQS, --max-target-seqs MAX_TARGET_SEQS
                         Number of maximum identifications for each protein.
                         Default is 1.
