@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 reCOGnizer - a tool for functional annotation with COGs
 
@@ -133,7 +134,7 @@ Output:
     returns pandas.DataFrame with the functional categories intrisic levels 
     reorganized into corresponding columns
 '''      
-def organize_cdd_blast(cogblast, fun = 'Databases/fun.txt'):
+def organize_cdd_blast(cogblast, fun = sys.path[0] + '/Databases/fun.txt'):
     cogblast = parse_cogblast(cogblast)
     cogblast = cogblast[cogblast['functional categories'].notnull()]
     cog_relation = parse_fun(fun)
@@ -274,7 +275,8 @@ def main():
     # convert CDD IDs to COGs
     timed_message('Converting CDD IDs to respective COG IDs.')
     annotate_cogs(args.output + '/cdd_aligned.blast', args.output, 
-        'Databases/cddid.tbl', 'Databases/fun.txt', 'Databases/whog')
+        sys.path[0] + '/Databases/cddid.tbl', sys.path[0] + '/Databases/fun.txt', 
+        sys.path[0] + '/Databases/whog')
     
     # organize the results from cdd2cog and write protein COG assignment
     timed_message('Retrieving COG categories from COGs.')
