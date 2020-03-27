@@ -86,10 +86,10 @@ Output:
 def run_rpsblast(fasta, output, cog, threads = '0', max_target_seqs = '1'):
     bashCommand = 'rpsblast -query {} -db "{}" -out {} -outfmt 6 -num_threads {} -max_target_seqs {}'.format(
             fasta, cog, output, threads, max_target_seqs)
-    open('Databases/command.bash', 'w').write(bashCommand + '\n') # subprocess was not handling well running this command, so an intermediate file is written with the command to run # TODO - check if this problem persists
+    open('command.bash', 'w').write(bashCommand + '\n') # subprocess was not handling well running this command, so an intermediate file is written with the command to run # TODO - check if this problem persists
     print(bashCommand)
-    run_command('bash Databases/command.bash', print_command = False)
-    os.remove('Databases/command.bash')
+    run_command('bash command.bash', print_command = False)
+    os.remove('command.bash')
     
 '''
 Input: 
@@ -190,7 +190,7 @@ def create_split_cog_db(smp_directory, output, threads = '6'):
         k, m = divmod(len(a), n)
         return (a[i * k + min(i, m):(i + 1) * k + min(i + 1, m)] for i in range(n))
     
-    database_reporter = output.rstrip('/') + '/databases.txt'
+    database_reporter = '/'.join(output.split('/')[:-1]) + '/databases.txt'
     dbs = (open(database_reporter).read().split('\n') if
     os.path.isfile(database_reporter) else list())
     if threads in dbs:
@@ -207,7 +207,8 @@ def create_split_cog_db(smp_directory, output, threads = '6'):
             run_command('makeprofiledb -in {0} -title {1} -out {1}'.format(     # -title and -out options are defaulted as input file name to -in argument; -dbtype default is 'rps'
                     file, file.split('.pn')[0]))
             
-        open(database_reporter,'w').write('\n'.join(dbs + [threads]))
+        with open(database_reporter,'w') as dr:
+            dr.write('\n'.join(dbs + [threads]))
         
 '''
 intput: 
