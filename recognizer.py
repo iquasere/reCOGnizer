@@ -260,7 +260,7 @@ def main():
         
         # create database if it doesn't exit
         timed_message('Checking if database exists for {} threads.'.format(args.threads))
-        create_split_cog_db('Databases', args.output_databases + '/COG', args.threads)
+        create_split_cog_db('{}/Databases'.format(sys.path[0]), args.output_databases + '/COG', args.threads)
     
         # set database(s)
         databases = [pn.split('.pn')[0] for pn in glob.glob('{}/COG_{}_*.pn'.format(
