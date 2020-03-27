@@ -84,12 +84,11 @@ Output:
     annotated file with CDD IDs
 '''
 def run_rpsblast(fasta, output, cog, threads = '0', max_target_seqs = '1'):
-    bashCommand = 'rpsblast -query {} -db "{}" -out {} -outfmt 6 -num_threads {} -max_target_seqs {}'.format(
-            fasta, cog, output, threads, max_target_seqs)
-    open('command.bash', 'w').write(bashCommand + '\n') # subprocess was not handling well running this command, so an intermediate file is written with the command to run # TODO - check if this problem persists
-    print(bashCommand)
-    run_command('bash command.bash', print_command = False)
-    os.remove('command.bash')
+    bashCommand = ['rpsblast', '-query', fasta,  '-db', cog, '-out', output, 
+                   '-outfmt', '6', '-num_threads', threads, '-max_target_seqs', 
+                   max_target_seqs]
+    print(' '.join(bashCommand))
+    subprocess.run(bashCommand)
     
 '''
 Input: 
