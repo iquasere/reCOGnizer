@@ -10,5 +10,5 @@ if [ "$1" != "" ]; then
     wget ftp://ftp.ncbi.nlm.nih.gov/pub/COG/COG/fun.txt
     wget ftp://ftp.ncbi.nlm.nih.gov/pub/COG/COG/whog
 else
-    echo "Positional parameter 1 is empty"
+    echo "Must specify an output directory for resources!"
 fi

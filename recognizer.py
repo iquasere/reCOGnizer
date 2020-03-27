@@ -71,7 +71,7 @@ Input:
 Output:
 '''
 def download_resources(database_directory):
-    run_command('bash download_resources.bash {}'.format(database_directory))
+    run_command('bash {}/download_resources.bash {}'.format(sys.path[0], database_directory))
     
 '''
 Input: 
