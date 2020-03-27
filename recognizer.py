@@ -198,7 +198,7 @@ def create_split_cog_db(smp_directory, output, threads = '6'):
     else:
         print('Generating COG databases for [' + threads + '] threads.')
         smp_list = glob.glob(smp_directory + '/COG*.smp')
-        parts = split(smp_list, int(threads))
+        parts = list(split(smp_list, int(threads)))
         for i in range(len(parts)):
             open('{}_{}_{}.pn'.format(output, threads, str(i)), 'w').write('\n'.join(parts[i]))
 
