@@ -6,7 +6,7 @@ if [ "$1" != "" ]; then
     tar -xzvf cdd.tar.gz --wildcards --no-anchored 'COG*.smp'
     rm cdd.tar.gz
     wget ftp://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/cddid.tbl.gz
-    gunzip /Databases/cddid.tbl.gz
+    gunzip cddid.tbl.gz
     wget ftp://ftp.ncbi.nlm.nih.gov/pub/COG/COG/fun.txt
     wget ftp://ftp.ncbi.nlm.nih.gov/pub/COG/COG/whog
 else

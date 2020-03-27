@@ -177,8 +177,20 @@ Output:
     the list of SMP files available. These databases are formated for RPS-BLAST
     search
 '''
-def create_split_cog_db(smp_directory, output, threads = '6', step = None):
-    database_reporter = '/'.join(output.split('/')[:-1]) + '/databases.txt'
+def create_split_cog_db(smp_directory, output, threads = '6'):
+    '''
+    Input:
+        a: list - list to be splited
+        n: int - number of parts into
+    Output:
+        list - a splited in n parts
+        output + /databases.txt will have added the threads for new database
+    '''
+    def split(a, n):
+        k, m = divmod(len(a), n)
+        return (a[i * k + min(i, m):(i + 1) * k + min(i + 1, m)] for i in range(n))
+    
+    database_reporter = output.rstrip('/') + '/databases.txt'
     dbs = (open(database_reporter).read().split('\n') if
     os.path.isfile(database_reporter) else list())
     if threads in dbs:
@@ -186,20 +198,14 @@ def create_split_cog_db(smp_directory, output, threads = '6', step = None):
     else:
         print('Generating COG databases for [' + threads + '] threads.')
         smp_list = glob.glob(smp_directory + '/COG*.smp')
-        if step is None:
-            step = round(len(smp_list) / float(threads))
-        i = 0
-        pn_files = list()
-        output += '_' + threads + '_'
-        while i + step < len(smp_list):
-            pn_files.append(output + str(int(i / step)) + '.pn')
-            open(output + str(int(i / step)) + '.pn', 'w').write('\n'.join(smp_list[i:i + step]))
-            i += step
-        open(output + str(int(i / step)) + '.pn', 'w').write('\n'.join(smp_list[i:len(smp_list)]))
-        pn_files.append(output + str(int(i / step)) + '.pn')
-        for file in pn_files:
+        parts = split(smp_list, int(threads))
+        for i in range(len(parts)):
+            open('{}_{}_{}.pn'.format(output, threads, str(i)), 'w').write('\n'.join(parts[i]))
+
+        for file in ['{}_{}_{}.pn'.format(output, threads, str(i)) for i in range(len(parts))]:
             run_command('makeprofiledb -in {0} -title {1} -out {1}'.format(     # -title and -out options are defaulted as input file name to -in argument; -dbtype default is 'rps'
                     file, file.split('.pn')[0]))
+            
         open(database_reporter,'w').write('\n'.join(dbs + [threads]))
         
 '''
