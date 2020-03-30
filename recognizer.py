@@ -33,6 +33,8 @@ def get_arguments():
     parser.add_argument("-seqs", "--max-target-seqs", type = str,
                         help="""Number of maximum identifications for each protein.
                         Default is 1.""", default = "1")
+    parser.add_argument("--tsv", action = "store_true", default = False,
+                        help="Tables will be produced in TSV format (and not EXCEL).")
 
     args = parser.parse_args()
     
@@ -221,7 +223,20 @@ def validate_database(database):
         if not os.path.isfile('{}.{}'.format(database, ext)):
             return False
     return True
-    
+
+'''
+Input:
+    table: pandas.DataFrame - table to write
+    output: str - filename of output
+    out_format: str - 'tsv' or 'excel' format to write as
+Output:
+    table will be written in the format specified
+'''
+def write_table(table, output, out_format = 'excel', header = True):
+    if out_format == 'excel':
+        table.to_excel(output, index = False, header = header)
+    elif out_format == 'tsv':
+        table.to_csv(output, index = False, sep = '\t', header = header)
         
 '''
 Input:
@@ -279,24 +294,29 @@ def main():
         sys.path[0] + '/Databases/whog')
     
     # organize the results from cdd2cog and write protein COG assignment
+    out_format = 'tsv' if args.tsv else 'excel'
     timed_message('Retrieving COG categories from COGs.')
     cogblast = organize_cdd_blast(args.output + '/results/rps-blast_cog.txt')
-    cogblast[['qseqid'] + cogblast.columns.tolist()[:-1]].to_excel(
-            args.output + '/protein2cog.xlsx', index = False)
+    write_table(cogblast[['qseqid'] + cogblast.columns.tolist()[:-1]],
+                         args.output + '/protein2cog.xlsx', 
+                         out_format = out_format)
     
     # quantify COG categories
     timed_message('Quantifying COG categories.')
     del cogblast['qseqid']
     cogblast = cogblast.groupby(cogblast.columns.tolist()).size().reset_index().rename(columns={0:'count'})
-    cogblast.to_excel(args.output + '/cog_quantification.xlsx', index = False)
+    write_table(cogblast, 
+                args.output + '/cog_quantification.xlsx', 
+                out_format = out_format)
     timed_message('COG categories quantification is available at {}.'.format(
             args.output + '/cog_quantification.tsv'))
     
     # represent that quantification in krona plot
     timed_message('Creating Krona plot representation.')
-    cogblast[['count'] + cogblast.columns.tolist()[:-1]].to_csv(
-            args.output + '/cog_quantification.tsv', index = False, 
-            header = False, sep = '\t')
+    write_table(cogblast[['count'] + cogblast.columns.tolist()[:-1]], 
+                         args.output + '/cog_quantification.tsv',
+                         header = False,
+                         out_format = 'tsv')
     create_krona_plot(args.output + '/cog_quantification.tsv')
             
 if __name__ == '__main__':
