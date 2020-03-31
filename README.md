@@ -4,7 +4,7 @@ A tool for domain based annotation with the COG database.
 
 ## Features
 
-reCOGnizer is a user-friendly implementation of protein functional identification using COG database. It builds a splitted version of the COG database with which RPS-BLAST can run in multithread, significantly speeding the time intensive step of protein annotation. After COG assignment to proteins, reCOGnizer makes use of cdd2cog to convert CDD IDs to their respective COGs, before organizing those COGs into a relational table of protein to COG, with the inclusion of the three levels of functional classification from COG.
+reCOGnizer is a user-friendly implementation of protein functional identification using COG database. It builds a split version of the COG database with which RPS-BLAST can run in multithread, significantly increasing the speed of the most time intensive step of protein annotation. After COG assignment to proteins, reCOGnizer makes use of cdd2cog to convert CDD IDs to their respective COGs, before organizing those COGs into a relational table of protein to COG, with the inclusion of the three levels of functional classification from COG.
 
 ## Installation
 
@@ -38,6 +38,7 @@ optional arguments:
   -seqs MAX_TARGET_SEQS, --max-target-seqs MAX_TARGET_SEQS
                         Number of maximum identifications for each protein.
                         Default is 1.
+  --tsv                 Tables will be produced in TSV format (and not EXCEL).
 ```
 
 The simplest way to run reCOGnizer is to just specify the fasta filename and an output directory
@@ -48,8 +49,8 @@ recognizer.py -f input_file.fasta -o output_folder
 ## Outputs
 
 reCOGnizer takes a FASTA file as input and produces two main outputs into the output directory:
-* protein2cog.xlsx, an Excel file assigning COGs to the proteins
-* cog_quantification.tsv and respective Krona representation, which describes the functinoal landscape of the proteins in the input file
+* protein2cog, a table relating assigned cogs to queried proteins
+* cog_quantification and respective Krona representation, which describes the functional landscape of the proteins in the input file
 
 ![ScreenShot](krona_plot.png)
 Krona plot with the quantification of COGs identified in the simulated dataset used to test [MOSCA](github.com/iquasere/MOSCA) and reCOGnizer.

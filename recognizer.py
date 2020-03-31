@@ -234,9 +234,9 @@ Output:
 '''
 def write_table(table, output, out_format = 'excel', header = True):
     if out_format == 'excel':
-        table.to_excel(output, index = False, header = header)
+        table.to_excel(output + '.xlsx', index = False, header = header)
     elif out_format == 'tsv':
-        table.to_csv(output, index = False, sep = '\t', header = header)
+        table.to_csv(output + '.tsv', index = False, sep = '\t', header = header)
         
 '''
 Input:
@@ -298,7 +298,7 @@ def main():
     timed_message('Retrieving COG categories from COGs.')
     cogblast = organize_cdd_blast(args.output + '/results/rps-blast_cog.txt')
     write_table(cogblast[['qseqid'] + cogblast.columns.tolist()[:-1]],
-                         args.output + '/protein2cog.xlsx', 
+                         args.output + '/protein2cog', 
                          out_format = out_format)
     
     # quantify COG categories
@@ -306,10 +306,10 @@ def main():
     del cogblast['qseqid']
     cogblast = cogblast.groupby(cogblast.columns.tolist()).size().reset_index().rename(columns={0:'count'})
     write_table(cogblast, 
-                args.output + '/cog_quantification.xlsx', 
+                args.output + '/cog_quantification', 
                 out_format = out_format)
     timed_message('COG categories quantification is available at {}.'.format(
-            args.output + '/cog_quantification.tsv'))
+            args.output + '/cog_quantification'))
     
     # represent that quantification in krona plot
     timed_message('Creating Krona plot representation.')
