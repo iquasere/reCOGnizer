@@ -1,3 +1,4 @@
+# reCOGnizer 1.1.2
 FROM continuumio/miniconda3
 
 RUN buildDeps='build-essential zlib1g-dev' \
