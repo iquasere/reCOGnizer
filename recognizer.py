@@ -314,10 +314,10 @@ def main():
     # represent that quantification in krona plot
     timed_message('Creating Krona plot representation.')
     write_table(cogblast[['count'] + cogblast.columns.tolist()[:-1]], 
-                         args.output + '/cog_quantification.tsv',
+                         args.output + '/krona',
                          header = False,
                          out_format = 'tsv')
-    create_krona_plot(args.output + '/cog_quantification.tsv')
+    create_krona_plot(args.output + '/krona.tsv', args.output + '/cog_quantification.html')
             
 if __name__ == '__main__':
     main()
