@@ -294,7 +294,7 @@ def main():
     if args.database:
         if not args.custom_database:                                            # if database was built by reCOGnizer
             args.threads = int(args.database.split('_')[-1])
-            databases = [args.database + '_' + i for i in range(args.threads)]
+            databases = ['{}_{}'.format(args.database, str(i)) for i in range(args.threads)]
         else:
             databases = args.database.split(',')
         for database in databases:
