@@ -213,9 +213,9 @@ def create_split_cog_db(smp_directory, output, threads = '6'):
             dr.write('\n'.join(dbs + [threads]))
         
 '''
-intput: 
+Input: 
     database: str - database basename
-output:
+Output:
     boolean - True if it seems a valid database, false otherwise
 '''
 def validate_database(database):
@@ -223,6 +223,40 @@ def validate_database(database):
         if not os.path.isfile('{}.{}'.format(database, ext)):
             return False
     return True
+
+'''
+Input:
+    files_directory: str
+Output:
+    files will be downloaded if missing
+'''
+def download_eggnog_files(directory = sys.path[0] + '/Databases'):
+    web_locations = {'cog2ec.py': 'https://bitbucket.org/scilifelab-lts/lts-workflows-sm-metagenomics/raw/screening_legacy/lts_workflows_sm_metagenomics/source/utils/cog2ec.py',
+                     'eggnog4.protein_id_conversion.tsv': 'http://eggnogdb.embl.de/download/eggnog_4.5/eggnog4.protein_id_conversion.tsv.gz',
+                     'NOG.members.tsv': 'http://eggnogdb.embl.de/download/eggnog_4.5/data/NOG/NOG.members.tsv.gz'}
+    for file in ['cog2ec.py', 'eggnog4.protein_id_conversion.tsv', 'NOG.members.tsv']:
+        if not os.path.isfile('{}/{}'.format(directory, file)):
+            print('{}/{} not found! Downloading...'.format(directory, file))
+            run_command('wget -P {} {}'.format(directory, web_locations[file]))
+            if web_locations[file][-3:] == '.gz':
+                run_command('gunzip {}/{}'.format(directory, file))
+        else:
+            print('{}/{} found!'.format(directory, file))
+
+'''
+Input:
+    cogblast: pandas.DataFrame - qseqid, cog categories
+Output:
+    pandas.DataFrame - same dataframe with added "EC number" column
+'''
+def cog2ec(cogblast, table = sys.path[0] + '/Databases/cog2ec.tsv'):
+    if not os.path.isfile(table):
+        download_eggnog_files()
+        run_command('python {0}/cog2ec.py -c {0}/eggnog4.protein_id_conversion.tsv -m {0}/NOG.members.tsv > {1}'.format(
+                sys.path[0] + '/Databases', table))
+    cog2ec = pd.read_csv(table, sep = '\t', columns = ['cog', 'EC number'])
+    return pd.merge(cogblast, cog2ec, on = 'cog')
+    
 
 '''
 Input:
@@ -251,7 +285,7 @@ def create_krona_plot(tsv, output = None):
     if output is None:
         output = tsv.replace('.tsv','.html')
     run_command('perl Krona/KronaTools/scripts/ImportText.pl {} -o {}'.format(tsv, output))
-        
+
 def main():
     
     # get arguments
@@ -293,19 +327,25 @@ def main():
         sys.path[0] + '/Databases/cddid.tbl', sys.path[0] + '/Databases/fun.txt', 
         sys.path[0] + '/Databases/whog')
     
-    # organize the results from cdd2cog and write protein COG assignment
+    # organize the results from cdd2cog
     out_format = 'tsv' if args.tsv else 'excel'
     timed_message('Retrieving COG categories from COGs.')
     cogblast = organize_cdd_blast(args.output + '/results/rps-blast_cog.txt')
-    write_table(cogblast[['qseqid'] + cogblast.columns.tolist()[:-1]],
-                         args.output + '/protein2cog', 
-                         out_format = out_format)
+    
+    # cog2ec
+    cogblast = cog2ec(cogblast[['qseqid'] + cogblast.columns.tolist()[:-1]])
+    
+    # write protein COG assignment
+    write_table(cogblast,
+                args.output + '/protein2cog', 
+                out_format = out_format)
     
     # quantify COG categories
     timed_message('Quantifying COG categories.')
-    del cogblast['qseqid']
-    cogblast = cogblast.groupby(cogblast.columns.tolist()).size().reset_index().rename(columns={0:'count'})
-    write_table(cogblast, 
+    cog_quantification = cogblast.groupby(['COG general functional category',
+            'COG functional category', 'COG protein description', 'cog']).size(
+            ).reset_index().rename(columns={0:'count'})
+    write_table(cog_quantification, 
                 args.output + '/cog_quantification', 
                 out_format = out_format)
     timed_message('COG categories quantification is available at {}.'.format(
@@ -318,6 +358,6 @@ def main():
                          header = False,
                          out_format = 'tsv')
     create_krona_plot(args.output + '/krona.tsv', args.output + '/cog_quantification.html')
-            
+    
 if __name__ == '__main__':
     main()
