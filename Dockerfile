@@ -7,7 +7,7 @@ RUN buildDeps='build-essential zlib1g-dev' \
 && conda config --add channels defaults \
 && conda config --add channels bioconda \
 && conda config --add channels anaconda \
-&& git clone -b development https://github.com/iquasere/reCOGnizer.git \
+&& git clone https://github.com/iquasere/reCOGnizer.git \
 && conda install -c anaconda pandas \
 && conda install -c bioconda blast \
 && conda install -c anaconda lxml \

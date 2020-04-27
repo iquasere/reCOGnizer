@@ -28,8 +28,8 @@ def get_arguments():
     parser.add_argument("-db", "--database", type = str,
                         help = """Basename of COG database for annotation. 
                         If multiple databases, use comma separated list (db1,db2,db3)""")
-    parser.add_argument("--database-by-recognizer", type = str,
-                        help = "If inputed database was produced by reCOGnizer")
+    parser.add_argument("--custom-database", action = "store_true", default = False,
+                        help = "If database was NOT produced by reCOGnizer")
     parser.add_argument("-seqs", "--max-target-seqs", type = str,
                         help="""Number of maximum identifications for each protein.
                         Default is 1.""", default = "1")
@@ -292,7 +292,7 @@ def main():
     args = get_arguments()
     
     if args.database:
-        if args.database_by_recognizer:                                         # if database was built by reCOGnizer
+        if not args.custom_database:                                            # if database was built by reCOGnizer
             args.threads = int(args.database.split('_')[-1])
             databases = [args.database + '_' + i for i in range(args.threads)]
         else:
