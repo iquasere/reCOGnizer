@@ -71,10 +71,27 @@ def run_command(bashCommand, print_command = True):
     
 '''
 Input:
+    database_directory: str - directory to store files for database construction
+        and reCOGnizer workflow
 Output:
+    files to construct database will be downloaded to database_directory
 '''
 def download_resources(database_directory):
-    run_command('bash {}/download_resources.bash {}'.format(sys.path[0], database_directory))
+    commands = {'COG0001.smp': ['wget ftp://ftp.ncbi.nih.gov/pub/mmdb/cdd/cdd.tar.gz -P {}'.format(database_directory),
+                   'tar -xzvf {0}/cdd.tar.gz --wildcards --no-anchored "COG*.smp" --directory {0}'.format(database_directory),
+                   'rm {}/cdd.tar.gz'.format(database_directory)],
+    'cddid.tbl': ['wget ftp://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/cddid.tbl.gz -P {}'.format(database_directory),
+                 'gunzip {}/cddid.tbl.gz'.format(database_directory)],
+    'fun.txt': ['wget ftp://ftp.ncbi.nlm.nih.gov/pub/COG/COG/fun.txt -P {}'.format(database_directory)],
+    'whog': ['wget ftp://ftp.ncbi.nlm.nih.gov/pub/COG/COG/whog -P {}'.format(database_directory)]}
+    
+    for file in commands.keys():
+        if not os.path.isfile('{}/{}'.format(database_directory, file)):
+            print('{}/{} not found! Downloading...'.format(database_directory, file))
+            for command in commands[file]:
+                run_command(command)
+        else:
+            print('{}/{} was found!'.format(database_directory, file))
     
 '''
 Input: 
@@ -179,7 +196,7 @@ Output:
     the list of SMP files available. These databases are formated for RPS-BLAST
     search
 '''
-def create_split_cog_db(smp_directory, output, threads = '6'):
+def create_split_cog_db(smp_directory, output, threads = '12'):
     '''
     Input:
         a: list - list to be splited
