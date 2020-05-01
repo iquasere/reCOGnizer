@@ -320,10 +320,7 @@ def main():
                 exit()
     else:
         # check if necessary files exist to build database
-        for file in ['cddid.tbl', 'fun.txt', 'whog']:
-            if not os.path.isfile('{}/Databases/{}'.format(sys.path[0], file)):
-                print('{}/Databases/{} not found!'.format(sys.path[0], file))
-                download_resources('{}/Databases'.format(sys.path[0]))
+        download_resources('{}/Databases'.format(sys.path[0]))
         
         # create database if it doesn't exit
         timed_message('Checking if database exists for {} threads.'.format(args.threads))
