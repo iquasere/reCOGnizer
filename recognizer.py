@@ -78,7 +78,7 @@ Output:
 '''
 def download_resources(database_directory):
     commands = {'COG0001.smp': ['wget ftp://ftp.ncbi.nih.gov/pub/mmdb/cdd/cdd.tar.gz -P {}'.format(database_directory),
-                   'tar -xzvf {0}/cdd.tar.gz --wildcards --no-anchored "COG*.smp" --directory {0}'.format(database_directory),
+                   'tar -xzf {0}/cdd.tar.gz --directory={0} --wildcards "COG*.smp"'.format(database_directory),
                    'rm {}/cdd.tar.gz'.format(database_directory)],
     'cddid.tbl': ['wget ftp://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/cddid.tbl.gz -P {}'.format(database_directory),
                  'gunzip {}/cddid.tbl.gz'.format(database_directory)],
