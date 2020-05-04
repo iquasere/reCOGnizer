@@ -77,21 +77,25 @@ Output:
     files to construct database will be downloaded to database_directory
 '''
 def download_resources(database_directory):
-    commands = {'COG0001.smp': ['wget ftp://ftp.ncbi.nih.gov/pub/mmdb/cdd/cdd.tar.gz -P {}'.format(database_directory),
-                   'tar -xzf {0}/cdd.tar.gz --directory={0} --wildcards "COG*.smp"'.format(database_directory),
-                   'rm {}/cdd.tar.gz'.format(database_directory)],
-    'cddid.tbl': ['wget ftp://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/cddid.tbl.gz -P {}'.format(database_directory),
-                 'gunzip {}/cddid.tbl.gz'.format(database_directory)],
-    'fun.txt': ['wget ftp://ftp.ncbi.nlm.nih.gov/pub/COG/COG/fun.txt -P {}'.format(database_directory)],
-    'whog': ['wget ftp://ftp.ncbi.nlm.nih.gov/pub/COG/COG/whog -P {}'.format(database_directory)]}
-    
-    for file in commands.keys():
-        if not os.path.isfile('{}/{}'.format(database_directory, file)):
-            print('{}/{} not found! Downloading...'.format(database_directory, file))
-            for command in commands[file]:
-                run_command(command)
-        else:
-            print('{}/{} was found!'.format(database_directory, file))
+    if not os.path.isfile('{}/COG0001.smp'.format(database_directory)):
+        print('{}/COG0001.smp not found!'.format(database_directory))
+        if not os.path.isfile('{}/cdd.tar.gz'.format(database_directory)):
+            print('{}/cdd.tar.gz not found! Downloading...'.format(database_directory))
+            run_command('wget ftp://ftp.ncbi.nih.gov/pub/mmdb/cdd/cdd.tar.gz -P {}'.format(database_directory))
+        wd = os.getcwd()
+        os.chdir(database_directory)
+        run_command('tar -xzf cdd.tar.gz --wildcards "COG*.smp"')           # I couldn't, for the life of me, put the -C or --directory flags to work. No idea what happened, this just works
+        os.chdir(wd)
+    if not os.path.isfile('{}/cddid.tbl'.format(database_directory)):
+        print('{}/cddid.tbl not found!'.format(database_directory))
+        run_command('wget ftp://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/cddid.tbl.gz -P {}'.format(database_directory))
+        run_command('gunzip {}/cddid.tbl.gz'.format(database_directory))
+    if not os.path.isfile('{}/fun.txt'.format(database_directory)):
+        print('{}/fun.txt not found!'.format(database_directory))
+        run_command('wget ftp://ftp.ncbi.nlm.nih.gov/pub/COG/COG/fun.txt -P {}'.format(database_directory))
+    if not os.path.isfile('{}/whog'.format(database_directory)):
+        print('{}/whog not found!'.format(database_directory))
+        run_command('wget ftp://ftp.ncbi.nlm.nih.gov/pub/COG/COG/whog -P {}'.format(database_directory))
     
 '''
 Input: 
