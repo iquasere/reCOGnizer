@@ -84,7 +84,7 @@ def download_resources(database_directory):
             run_command('wget ftp://ftp.ncbi.nih.gov/pub/mmdb/cdd/cdd.tar.gz -P {}'.format(database_directory))
         wd = os.getcwd()
         os.chdir(database_directory)
-        run_command('tar -xzf cdd.tar.gz --wildcards "COG*.smp"')           # I couldn't, for the life of me, put the -C or --directory flags to work. No idea what happened, this just works
+        subprocess.Popen('tar -xzf cdd.tar.gz --wildcards "COG*.smp"', shell = True).communicate() # I couldn't, for the life of me, put the -C or --directory flags to work. No idea what happened, this just works
         os.chdir(wd)
     if not os.path.isfile('{}/cddid.tbl'.format(database_directory)):
         print('{}/cddid.tbl not found!'.format(database_directory))
