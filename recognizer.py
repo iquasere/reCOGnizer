@@ -84,6 +84,7 @@ def download_resources(database_directory):
             run_command('wget ftp://ftp.ncbi.nih.gov/pub/mmdb/cdd/cdd.tar.gz -P {}'.format(database_directory))
         wd = os.getcwd()
         os.chdir(database_directory)
+        print('tar -xzf {}/cdd.tar.gz --wildcards "COG*.smp"'.format(database_directory))
         subprocess.Popen('tar -xzf cdd.tar.gz --wildcards "COG*.smp"', shell = True).communicate() # I couldn't, for the life of me, put the -C or --directory flags to work. No idea what happened, this just works
         os.chdir(wd)
     if not os.path.isfile('{}/cddid.tbl'.format(database_directory)):
@@ -203,11 +204,10 @@ Output:
 def create_split_cog_db(smp_directory, output, threads = '12'):
     '''
     Input:
-        a: list - list to be splited
+        a: list - list to be split
         n: int - number of parts into
     Output:
-        list - a splited in n parts
-        output + /databases.txt will have added the threads for new database
+        list - the list split in n parts
     '''
     def split(a, n):
         k, m = divmod(len(a), n)
@@ -215,7 +215,7 @@ def create_split_cog_db(smp_directory, output, threads = '12'):
     
     database_reporter = '/'.join(output.split('/')[:-1]) + '/databases.txt'
     dbs = (open(database_reporter).read().split('\n') if
-    os.path.isfile(database_reporter) else list())
+           os.path.isfile(database_reporter) else list())
     if threads in dbs:
         print('Already built COG database for [' + threads + '] threads.')
     else:
@@ -275,7 +275,7 @@ def cog2ec(cogblast, table = sys.path[0] + '/Databases/cog2ec.tsv'):
         download_eggnog_files()
         run_command('python {0}/cog2ec.py -c {0}/eggnog4.protein_id_conversion.tsv -m {0}/NOG.members.tsv > {1}'.format(
                 sys.path[0] + '/Databases', table))
-    cog2ec = pd.read_csv(table, sep = '\t', columns = ['cog', 'EC number'])
+    cog2ec = pd.read_csv(table, sep = '\t', names = ['cog', 'EC number'])
     return pd.merge(cogblast, cog2ec, on = 'cog')
     
 
@@ -371,7 +371,7 @@ def main():
     
     # represent that quantification in krona plot
     timed_message('Creating Krona plot representation.')
-    write_table(cogblast[['count'] + cogblast.columns.tolist()[:-1]], 
+    write_table(cog_quantification[['count'] + cog_quantification.columns.tolist()[:-1]], 
                          args.output + '/krona',
                          header = False,
                          out_format = 'tsv')
