@@ -4,7 +4,7 @@ A tool for domain based annotation with the COG database.
 
 ## Features
 
-reCOGnizer is a user-friendly implementation of protein functional identification using COG database. It builds a split version of the COG database with which RPS-BLAST can run in multithread, significantly increasing the speed of the most time intensive step of protein annotation. After COG assignment to proteins, reCOGnizer makes use of cdd2cog to convert CDD IDs to their respective COGs, before organizing those COGs into a relational table of protein to COG, with the inclusion of the three levels of functional classification from COG.
+reCOGnizer is a user-friendly implementation of protein functional identification using COG database. It builds a split version of the COG database with which RPS-BLAST can run in multithread, significantly increasing the speed of the most time intensive step of protein annotation. After COG assignment to proteins, reCOGnizer makes use of cdd2cog to convert CDD IDs to their respective COGs, before organizing those COGs into a relational table of protein to COG, with the inclusion of the three levels of functional classification from COG. reCOGnizer further converts assigned COG functions to EC numbers, providing more functional information.
 
 ## Installation
 
@@ -33,8 +33,7 @@ optional arguments:
   -db DATABASE, --database DATABASE
                         Basename of COG database for annotation. If multiple
                         databases, use comma separated list (db1,db2,db3)
-  --database-by-recognizer DATABASE_BY_RECOGNIZER
-                        If inputed database was produced by reCOGnizer
+  --custom-database     If database was NOT produced by reCOGnizer
   -seqs MAX_TARGET_SEQS, --max-target-seqs MAX_TARGET_SEQS
                         Number of maximum identifications for each protein.
                         Default is 1.
@@ -59,6 +58,6 @@ Krona plot with the quantification of COGs identified in the simulated dataset u
 
 reCOGnizer already has its own image! To use it, just pull the image and run it!
 ```
-docker pull iquasere/recognizer:latest
+docker pull iquasere/recognizer:1.2.0
 docker run -it -v absolute/path/to/fasta_folder:/input_folder /absolute/path/to/output_folder:/output_folder --rm iquasere/recognizer -f /input_folder/input_file.fasta -o /output_folder [other arguments]
 ```

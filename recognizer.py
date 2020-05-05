@@ -78,7 +78,7 @@ Output:
 '''
 def download_resources(database_directory):
     if not os.path.isfile('{}/COG0001.smp'.format(database_directory)):
-        print('{}/COG0001.smp not found!'.format(database_directory))
+        print('{}/COG0001.smp not found! Retrieving from cdd.tar.gz...'.format(database_directory))
         if not os.path.isfile('{}/cdd.tar.gz'.format(database_directory)):
             print('{}/cdd.tar.gz not found! Downloading...'.format(database_directory))
             run_command('wget ftp://ftp.ncbi.nih.gov/pub/mmdb/cdd/cdd.tar.gz -P {}'.format(database_directory))
@@ -88,14 +88,14 @@ def download_resources(database_directory):
         subprocess.Popen('tar -xzf cdd.tar.gz --wildcards "COG*.smp"', shell = True).communicate() # I couldn't, for the life of me, put the -C or --directory flags to work. No idea what happened, this just works
         os.chdir(wd)
     if not os.path.isfile('{}/cddid.tbl'.format(database_directory)):
-        print('{}/cddid.tbl not found!'.format(database_directory))
+        print('{}/cddid.tbl not found! Downloading...'.format(database_directory))
         run_command('wget ftp://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/cddid.tbl.gz -P {}'.format(database_directory))
         run_command('gunzip {}/cddid.tbl.gz'.format(database_directory))
     if not os.path.isfile('{}/fun.txt'.format(database_directory)):
-        print('{}/fun.txt not found!'.format(database_directory))
+        print('{}/fun.txt not found! Downloading...'.format(database_directory))
         run_command('wget ftp://ftp.ncbi.nlm.nih.gov/pub/COG/COG/fun.txt -P {}'.format(database_directory))
     if not os.path.isfile('{}/whog'.format(database_directory)):
-        print('{}/whog not found!'.format(database_directory))
+        print('{}/whog not found! Downloading...'.format(database_directory))
         run_command('wget ftp://ftp.ncbi.nlm.nih.gov/pub/COG/COG/whog -P {}'.format(database_directory))
     
 '''
@@ -276,7 +276,7 @@ def cog2ec(cogblast, table = sys.path[0] + '/Databases/cog2ec.tsv'):
         run_command('python {0}/cog2ec.py -c {0}/eggnog4.protein_id_conversion.tsv -m {0}/NOG.members.tsv > {1}'.format(
                 sys.path[0] + '/Databases', table))
     cog2ec = pd.read_csv(table, sep = '\t', names = ['cog', 'EC number'])
-    return pd.merge(cogblast, cog2ec, on = 'cog')
+    return pd.merge(cogblast, cog2ec, on = 'cog', how = 'left')
     
 
 '''
@@ -357,6 +357,9 @@ def main():
     write_table(cogblast,
                 args.output + '/protein2cog', 
                 out_format = out_format)
+    
+    timed_message('Protein ID to COG and EC number is available at {}.'.format(
+            args.output + '/protein2cog'))
     
     # quantify COG categories
     timed_message('Quantifying COG categories.')
