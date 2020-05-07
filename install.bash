@@ -7,6 +7,4 @@ conda install -y -c anaconda pandas
 conda install -y -c bioconda blast
 conda install -y -c anaconda lxml
 conda install -y -c anaconda openpyxl
-cd reCOGnizer
-git clone https://github.com/marbl/Krona.git
-wget https://github.com/aleimba/bac-genomics-scripts/raw/master/cdd2cog/cdd2cog.pl
+conda install -y -c bioconda krona

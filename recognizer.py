@@ -11,6 +11,8 @@ import pandas as pd
 from time import gmtime, strftime
 import argparse, shutil, sys, os, multiprocessing, glob, subprocess, pathlib
 
+__version__ = '1.2.1'
+
 def get_arguments():    
     parser = argparse.ArgumentParser(description="reCOGnizer - a tool for domain based annotation with the COG database",
         epilog="Input file must be specified.")
@@ -35,6 +37,7 @@ def get_arguments():
                         Default is 1.""", default = "1")
     parser.add_argument("--tsv", action = "store_true", default = False,
                         help="Tables will be produced in TSV format (and not EXCEL).")
+    parser.add_argument('-v', '--version', action='version', version='reCOGnizer ' + __version__)
 
     args = parser.parse_args()
     
@@ -116,62 +119,22 @@ def run_rpsblast(fasta, output, cog, threads = '0', max_target_seqs = '1'):
     subprocess.run(bashCommand)
     
 '''
-Input: 
-    blast: str - name of blast output with CDD IDs
-    output: str - output foldername where to store the resuls folder
-    cddid: str - name of cddid summary file from ftp://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/cddid.tbl.gz
-    fun: str - name of fun file available at ftp://ftp.ncbi.nlm.nih.gov/pub/COG/COG/fun.txt
-    whog: str - name of whog file available at ftp://ftp.ncbi.nlm.nih.gov/pub/COG/COG/whog
-Output: 
-    CDD IDs will be converted to respective COGs, with results stored in 'output'
-    folder
+Input:
+    cddid: str - filename of cddid.tbl file
+Output:
+    returns pandas.DataFrame relating CDD ID to COG function
 '''
-def annotate_cogs(blast, output, cddid, fun, whog):
-    if os.path.isdir(os.getcwd() + '/results'):                                 # the cdd2cog tool does not overwrite, and fails if results directory already exists
-        print('Eliminating ' + os.getcwd() + '/results')
-        shutil.rmtree(os.getcwd() + '/results', ignore_errors=True)             # is not necessary when running the tool once, but better safe then sorry!
-    run_command('perl reCOGnizer/cdd2cog.pl -r {} -c {} -f {} -w {}'.format(
-            blast, cddid, fun, whog))
-    if os.path.isdir(output + '/results'):
-        shutil.rmtree(output + '/results')
-    shutil.copytree('results', output + '/results')
+def parse_cddid(cddid):
+    cddid = pd.read_csv(cddid, sep = '\t', header = None)[[0,1]]
+    cddid.columns = ['CDD ID', 'cog']
+    cddid['CDD ID'] = ['CDD:{}'.format(str(ide)) for ide in cddid['CDD ID']]
+    return cddid[cddid['cog'].str.startswith('COG')]
 
 '''
 Input: 
-    name of cddblast to parse
+    fun: str - the fun.txt filename
 Output: 
-    pandas.DataFrame object
-'''      
-def parse_cogblast(cogblast):
-    cogblast = pd.read_csv(cogblast, header=None, skiprows = 1, sep = '\t', low_memory=False)
-    cogblast = cogblast[list(range(0,14))+[18]]                             #several extra columns are produced because of bad formatting
-    cogblast.columns = ['qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen', 
-               'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore', 'cog',
-               'functional categories', 'COG protein description']
-    return cogblast
-    
-'''
-Input: 
-    cogblast: the output from cdd2go, a blast file with CDD and COG annotations
-    fun: the fun.txt file available at ftp://ftp.ncbi.nih.gov/pub/COG/COG/fun.txt
-Output: 
-    returns pandas.DataFrame with the functional categories intrisic levels 
-    reorganized into corresponding columns
-'''      
-def organize_cdd_blast(cogblast, fun = sys.path[0] + '/Databases/fun.txt'):
-    cogblast = parse_cogblast(cogblast)
-    cogblast = cogblast[cogblast['functional categories'].notnull()]
-    cog_relation = parse_fun(fun)
-    data = [cog_relation[functional_category] for functional_category in cogblast['functional categories']]
-    result = pd.DataFrame(data)
-    result.columns = ['COG general functional category','COG functional category']
-    result = pd.concat([result[['COG general functional category','COG functional category']], 
-                        cogblast[['COG protein description','cog','qseqid']]], axis = 1)
-    return result
-
-'''
-Input: the fun.txt file available at ftp://ftp.ncbi.nih.gov/pub/COG/COG/fun.txt
-Output: a dictionary in the form {COG category (letter): (COG category (name), COG supercategory)}
+    returns result: dict - in the form {COG category (letter): (COG category (name), COG supercategory)}
 '''      
 def parse_fun(fun):
     lines = open(fun).readlines()
@@ -187,7 +150,45 @@ def parse_fun(fun):
         else:
             supercategory = line
         i += 1
+    result = pd.DataFrame.from_dict(result).transpose().reset_index()
+    result.columns = ['COG functional category (letter)', 
+        'COG general functional category', 'COG functional category']
     return result
+
+'''
+Input:
+    whog: str - filename of whog file
+Output:
+    returns df: pandas.DataFrame - COG, COG functional category (letter), COG protein description
+'''
+def parse_whog(whog):
+    lines = list()
+    for line in [line.rstrip('\n') for line in open(whog).readlines() if line.startswith('[')]:
+        line = line.split()
+        lines.append([line[0][1], line[1], ' '.join(line[2:])])
+    df = pd.DataFrame(lines)
+    df.columns = ['COG functional category (letter)', 'cog', 'COG protein description']
+    return df
+
+'''
+Input:
+    blast: str - filename of blast outputted by RPS-BLAST with CDD identifications
+Output:
+    pandas.DataFrame with CDD IDs converted to COGs and respective categories
+'''
+def cdd2cog(blast, cddid = sys.path[0] + '/Databases/cddid.tbl', 
+            fun = sys.path[0] + '/Databases/fun.txt', 
+            whog = sys.path[0] + '/Databases/whog'):
+    result = pd.read_csv(blast, sep = '\t', header = None)[[0,1]]
+    result.columns = ['qseqid', 'CDD ID']
+    cddid = parse_cddid(cddid)
+    fun = parse_fun(fun)
+    whog = parse_whog(whog)
+    whog = pd.merge(whog, fun, on = 'COG functional category (letter)',  how = 'left')
+    result = pd.merge(result, cddid, on = 'CDD ID', how = 'left')
+    result = pd.merge(result, whog, on = 'cog', how = 'left')
+    return result[['qseqid', 'COG general functional category', 
+                   'COG functional category', 'COG protein description', 'cog']]
 
 '''
 Input:
@@ -305,7 +306,9 @@ Output:
 def create_krona_plot(tsv, output = None):
     if output is None:
         output = tsv.replace('.tsv','.html')
-    run_command('perl Krona/KronaTools/scripts/ImportText.pl {} -o {}'.format(tsv, output))
+    conda_exec = subprocess.check_output('which conda'.split()).decode('utf8')
+    run_command('{}/bin/ktImportText {} -o {}'.format(
+            conda_exec.split('/bin')[0], tsv, output))
 
 def main():
     
@@ -341,19 +344,14 @@ def main():
     
     # convert CDD IDs to COGs
     timed_message('Converting CDD IDs to respective COG IDs.')
-    annotate_cogs(args.output + '/cdd_aligned.blast', args.output, 
-        sys.path[0] + '/Databases/cddid.tbl', sys.path[0] + '/Databases/fun.txt', 
-        sys.path[0] + '/Databases/whog')
-    
-    # organize the results from cdd2cog
-    out_format = 'tsv' if args.tsv else 'excel'
-    timed_message('Retrieving COG categories from COGs.')
-    cogblast = organize_cdd_blast(args.output + '/results/rps-blast_cog.txt')
+    cogblast = cdd2cog(args.output + '/cdd_aligned.blast')
     
     # cog2ec
-    cogblast = cog2ec(cogblast[['qseqid'] + cogblast.columns.tolist()[:-1]])
+    timed_message('Converting COG IDs to EC numbers.')
+    cogblast = cog2ec(cogblast)
     
     # write protein COG assignment
+    out_format = 'tsv' if args.tsv else 'excel'
     write_table(cogblast,
                 args.output + '/protein2cog', 
                 out_format = out_format)

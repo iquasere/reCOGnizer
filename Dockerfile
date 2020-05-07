@@ -12,8 +12,7 @@ RUN buildDeps='build-essential zlib1g-dev' \
 && conda install -c bioconda blast \
 && conda install -c anaconda lxml \
 && conda install -c anaconda openpyxl \
-&& git clone https://github.com/marbl/Krona.git \
-&& wget https://github.com/aleimba/bac-genomics-scripts/raw/master/cdd2cog/cdd2cog.pl -P /reCOGnizer \
+&& conda install -c bioconda krona
 && apt-get purge -y --auto-remove $buildDeps
 
 ENTRYPOINT [ "python", "/reCOGnizer/recognizer.py" ]
