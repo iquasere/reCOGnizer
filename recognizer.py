@@ -263,7 +263,7 @@ def download_eggnog_files(directory = sys.path[0] + '/Databases'):
             print('{}/{} not found! Downloading...'.format(directory, file))
             run_command('wget -P {} {}'.format(directory, web_locations[file]))
             if web_locations[file][-3:] == '.gz':
-                run_command('gunzip {}/{}'.format(directory, file))
+                run_command('gunzip {}/{}.gz'.format(directory, file))
         else:
             print('{}/{} found!'.format(directory, file))
 
