@@ -69,10 +69,10 @@ Input:
 Output:
     command will be run... hopefully
 '''
-def run_command(bashCommand, print_command = True):
+def run_command(bashCommand, print_command = True, stdout = None):
     if print_command:
         print(bashCommand)
-    subprocess.run(bashCommand.split())
+    subprocess.run(bashCommand.split(), stdout = stdout)
     
 '''
 Input:
@@ -277,11 +277,10 @@ def cog2ec(cogblast, table = sys.path[0] + '/Databases/cog2ec.tsv',
            resources_dir = sys.path[0] + '/Databases'):
     if not os.path.isfile(table):
         download_eggnog_files(directory = resources_dir)
-        run_command('python {}/cog2ec.py -c {}/eggnog4.protein_id_conversion.tsv -m {}/NOG.members.tsv'.format(
-                resources_dir), stdout = table)
+        run_command('python {0}/cog2ec.py -c {0}/eggnog4.protein_id_conversion.tsv -m {0}/NOG.members.tsv'.format(
+                resources_dir), stdout = open(table, 'w'))
     cog2ec = pd.read_csv(table, sep = '\t', names = ['cog', 'EC number'])
     return pd.merge(cogblast, cog2ec, on = 'cog', how = 'left')
-    
 
 '''
 Input:
@@ -296,7 +295,7 @@ def write_table(table, output, out_format = 'excel', header = True):
         table.to_excel(output + '.xlsx', index = False, header = header)
     elif out_format == 'tsv':
         table.to_csv(output + '.tsv', index = False, sep = '\t', header = header)
-        
+
 '''
 Input:
     tsv: filename of TSV file to be inputed. Must have the format 
@@ -348,11 +347,15 @@ def main():
     
     # convert CDD IDs to COGs
     timed_message('Converting CDD IDs to respective COG IDs.')
-    cogblast = cdd2cog(args.output + '/cdd_aligned.blast')
+    cogblast = cdd2cog(args.output + '/cdd_aligned.blast',
+                       cddid = args.resources_directory + '/cddid.tbl', 
+                       fun = args.resources_directory + '/fun.txt', 
+                       whog = args.resources_directory + '/whog')
     
     # cog2ec
     timed_message('Converting COG IDs to EC numbers.')
-    cogblast = cog2ec(cogblast, resources_dir = args.resources_directory)
+    cogblast = cog2ec(cogblast, table = args.resources_directory + '/cog2ec.tsv',
+                      resources_dir = args.resources_directory)
     
     # write protein COG assignment
     out_format = 'tsv' if args.tsv else 'excel'
