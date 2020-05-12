@@ -75,7 +75,7 @@ docker run -it -v absolute/path/to/fasta_folder:/input_folder /absolute/path/to/
 
 ## Bioconda
 
-reCOGnizer can also be installed with Conda!
+reCOGnizer can also be installed with Conda! Many thanks to [Devon Ryan](https://github.com/dpryan79) for his precious help!
 ```
 conda install -c bioconda recognizer
 recognizer.py -v
