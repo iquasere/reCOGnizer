@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+#!/usr/bin/env python
 """
 reCOGnizer - a tool for functional annotation with COGs
 
@@ -9,23 +9,21 @@ Nov 2019
 
 import pandas as pd
 from time import gmtime, strftime
-import argparse, shutil, sys, os, multiprocessing, glob, subprocess, pathlib
+import argparse, sys, os, multiprocessing, glob, subprocess, pathlib
 
 __version__ = '1.2.1'
 
 def get_arguments():    
     parser = argparse.ArgumentParser(description="reCOGnizer - a tool for domain based annotation with the COG database",
         epilog="Input file must be specified.")
-    parser.add_argument("-f", "--file", type = str, required = True,
-                        help="Fasta file with protein sequences for annotation")
     parser.add_argument("-t", "--threads", type = str, 
                         default = str(multiprocessing.cpu_count() - 2),
                         help = """Number of threads for reCOGnizer to use. 
                         Default is number of CPUs available minus 2.""")
     parser.add_argument("-o", "--output", type = str, help = "Output directory",
                         default = 'reCOGnizer_results'),
-    parser.add_argument("-odb", "--output-databases", type = str, 
-                        help = "Output directory for storing COG databases",
+    parser.add_argument("-rd", "--resources-directory", type = str, 
+                        help = "Output directory for storing COG databases and other resources",
                         default = sys.path[0] + '/Databases')
     parser.add_argument("-db", "--database", type = str,
                         help = """Basename of COG database for annotation. 
@@ -38,11 +36,15 @@ def get_arguments():
     parser.add_argument("--tsv", action = "store_true", default = False,
                         help="Tables will be produced in TSV format (and not EXCEL).")
     parser.add_argument('-v', '--version', action='version', version='reCOGnizer ' + __version__)
+    
+    requiredNamed = parser.add_argument_group('required named arguments')
+    requiredNamed.add_argument("-f", "--file", type = str, required = True,
+                        help="Fasta file with protein sequences for annotation")
 
     args = parser.parse_args()
     
     args.output = args.output.rstrip('/')
-    args.output_databases = args.output_databases.rstrip('/')
+    args.resources_directory = args.resources_directory.rstrip('/')
 
     for directory in [args.output, args.output_databases]:
         if not os.path.isdir(directory):
@@ -271,9 +273,10 @@ Input:
 Output:
     pandas.DataFrame - same dataframe with added "EC number" column
 '''
-def cog2ec(cogblast, table = sys.path[0] + '/Databases/cog2ec.tsv'):
+def cog2ec(cogblast, table = sys.path[0] + '/Databases/cog2ec.tsv', 
+           resources_dir = sys.path[0] + '/Databases'):
     if not os.path.isfile(table):
-        download_eggnog_files()
+        download_eggnog_files(directory = resources_dir)
         run_command('python {0}/cog2ec.py -c {0}/eggnog4.protein_id_conversion.tsv -m {0}/NOG.members.tsv > {1}'.format(
                 sys.path[0] + '/Databases', table))
     cog2ec = pd.read_csv(table, sep = '\t', names = ['cog', 'EC number'])
@@ -327,15 +330,16 @@ def main():
                 exit()
     else:
         # check if necessary files exist to build database
-        download_resources('{}/Databases'.format(sys.path[0]))
+        download_resources(args.resources_directory) 
         
         # create database if it doesn't exit
         timed_message('Checking if database exists for {} threads.'.format(args.threads))
-        create_split_cog_db('{}/Databases'.format(sys.path[0]), args.output_databases + '/COG', args.threads)
+        create_split_cog_db(args.resources_directory, 
+                            args.resources_directory + '/COG', args.threads)
     
         # set database(s)
         databases = [pn.split('.pn')[0] for pn in glob.glob('{}/COG_{}_*.pn'.format(
-                args.output_databases, args.threads))]
+                args.resources_directory, args.threads))]
             
     # run annotation with psi-blast and COG database
     timed_message('Running annotation with PSI-BLAST and COG database as reference.')
@@ -348,7 +352,7 @@ def main():
     
     # cog2ec
     timed_message('Converting COG IDs to EC numbers.')
-    cogblast = cog2ec(cogblast)
+    cogblast = cog2ec(cogblast, resources_dir = args.resources_directory)
     
     # write protein COG assignment
     out_format = 'tsv' if args.tsv else 'excel'
