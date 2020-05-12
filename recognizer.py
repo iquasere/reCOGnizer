@@ -277,8 +277,8 @@ def cog2ec(cogblast, table = sys.path[0] + '/Databases/cog2ec.tsv',
            resources_dir = sys.path[0] + '/Databases'):
     if not os.path.isfile(table):
         download_eggnog_files(directory = resources_dir)
-        run_command('python {0}/cog2ec.py -c {0}/eggnog4.protein_id_conversion.tsv -m {0}/NOG.members.tsv > {1}'.format(
-                sys.path[0] + '/Databases', table))
+        run_command('python {}/cog2ec.py -c {}/eggnog4.protein_id_conversion.tsv -m {}/NOG.members.tsv'.format(
+                resources_dir), stdout = table)
     cog2ec = pd.read_csv(table, sep = '\t', names = ['cog', 'EC number'])
     return pd.merge(cogblast, cog2ec, on = 'cog', how = 'left')
     
