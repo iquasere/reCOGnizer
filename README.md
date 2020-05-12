@@ -21,7 +21,7 @@ sudo reCOGnizer/install.bash
 
 reCOGnizer needs an input file, but that is all it needs!
 ```
-usage: recognizer.py [-h] [-t THREADS] [-o OUTPUT] [-rd RESOURCES_DIRECTORY]
+usage: python recognizer.py [-h] [-t THREADS] [-o OUTPUT] [-rd RESOURCES_DIRECTORY]
                      [-db DATABASE] [--custom-database]
                      [-seqs MAX_TARGET_SEQS] [--tsv] [-v] -f FILE
 
@@ -53,7 +53,7 @@ required named arguments:
 
 The simplest way to run reCOGnizer is to just specify the fasta filename and an output directory - though even the output directory is not mandatory.
 ```
-recognizer.py -f input_file.fasta -o output_folder
+python recognizer.py -f input_file.fasta -o output_folder
 ```
 
 ## Outputs
@@ -78,5 +78,6 @@ docker run -it -v absolute/path/to/fasta_folder:/input_folder /absolute/path/to/
 reCOGnizer can also be installed with Conda!
 ```
 conda install -c bioconda recognizer
+recognizer.py -v
 ```
 **Warning:** running with Conda is better performed using the -rd parameter to store the databases and other resources in a directory of your choice. Doing so will prevent reCOGnizer from putting these files in unexpected locations.
