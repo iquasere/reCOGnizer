@@ -46,7 +46,7 @@ def get_arguments():
     args.output = args.output.rstrip('/')
     args.resources_directory = args.resources_directory.rstrip('/')
 
-    for directory in [args.output, args.output_databases]:
+    for directory in [args.output, args.resources_directory]:
         if not os.path.isdir(directory):
             pathlib.Path(directory).mkdir(parents=True, exist_ok=True)
             print('Created ' + directory)
