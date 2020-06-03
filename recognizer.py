@@ -11,7 +11,7 @@ import pandas as pd
 from time import gmtime, strftime
 import argparse, sys, os, multiprocessing, glob, subprocess, pathlib
 
-__version__ = '1.2.2'
+__version__ = '1.2.3'
 
 def get_arguments():    
     parser = argparse.ArgumentParser(description="reCOGnizer - a tool for domain based annotation with the COG database",
@@ -35,6 +35,12 @@ def get_arguments():
                         Default is 1.""", default = "1")
     parser.add_argument("--tsv", action = "store_true", default = False,
                         help="Tables will be produced in TSV format (and not EXCEL).")
+    parser.add_argument("--remove-spaces", action = "store_true", default = False,
+                        help="""BLAST ignores sequences IDs after the first space.
+                        This option changes all spaces to underscores to keep the full IDs.""")
+    parser.add_argument("--output-sequences", action = "store_true", default = False,
+                        help="""Protein sequences from the FASTA input will be stored
+                        in their own column. This produces considerably larger files.""")
     parser.add_argument('-v', '--version', action='version', version='reCOGnizer ' + __version__)
     
     requiredNamed = parser.add_argument_group('required named arguments')
@@ -73,6 +79,31 @@ def run_command(bashCommand, print_command = True, stdout = None):
     if print_command:
         print(bashCommand)
     subprocess.run(bashCommand.split(), stdout = stdout)
+    
+def run_pipe_command(bashCommand, file = '', mode = 'w', sep = ' ', print_message = True):
+    if print_message:
+        print(bashCommand)
+    subprocess.Popen(bashCommand, stdin=subprocess.PIPE, shell=True).communicate()
+
+'''
+Input:
+    fasta: str - filename of FASTA file to parse
+Output:
+    return dict = {protein ID : protein sequence}
+'''
+def parse_fasta(file):
+    lines = [line.rstrip('\n') for line in open(file)]
+    i = 0
+    sequences = dict()
+    while i < len(lines):
+        if lines[i].startswith('>'):
+            name = lines[i][1:]
+            sequences[name] = ''
+            i += 1
+            while i < len(lines) and not lines[i].startswith('>'):
+                sequences[name] += lines[i]
+                i += 1
+    return sequences
     
 '''
 Input:
@@ -325,8 +356,7 @@ def main():
             databases = args.database.split(',')
         for database in databases:
             if not validate_database(args.database):
-                print('Database not valid!')
-                exit()
+                exit('Database not valid!')
     else:
         # check if necessary files exist to build database
         download_resources(args.resources_directory) 
@@ -339,9 +369,14 @@ def main():
         # set database(s)
         databases = [pn.split('.pn')[0] for pn in glob.glob('{}/COG_{}_*.pn'.format(
                 args.resources_directory, args.threads))]
+        
+    # Replacing spaces for commas
+    timed_message('Replacing spaces for commas')
+    if args.remove_spaces:
+        run_pipe_command("sed -i -e 's/ /_/g' {}".format(args.file))
             
-    # run annotation with psi-blast and COG database
-    timed_message('Running annotation with PSI-BLAST and COG database as reference.')
+    # run annotation with rps-blast and COG database
+    timed_message('Running annotation with RPS-BLAST and COG database as reference.')
     run_rpsblast(args.file, args.output + '/cdd_aligned.blast', ' '.join(databases),
                  threads = args.threads, max_target_seqs = args.max_target_seqs)
     
@@ -357,7 +392,15 @@ def main():
     cogblast = cog2ec(cogblast, table = args.resources_directory + '/cog2ec.tsv',
                       resources_dir = args.resources_directory)
     
-    # write protein COG assignment
+    # adding protein sequences if requested
+    if args.output_sequences:
+        fasta = parse_fasta(args.file)
+        fasta = pd.DataFrame.from_dict(fasta, orient = 'index')
+        fasta.columns = ['Sequence']
+        cogblast = pd.merge(cogblast, fasta, left_on = 'qseqid', right_index = True, 
+                            how = 'right')
+    
+    # write protein to COG assignment
     out_format = 'tsv' if args.tsv else 'excel'
     write_table(cogblast,
                 args.output + '/protein2cog', 
