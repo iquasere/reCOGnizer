@@ -24,7 +24,7 @@ reCOGnizer needs an input file, but that is all it needs!
 usage: recognizer.py [-h] [-t THREADS] [-o OUTPUT] [-rd RESOURCES_DIRECTORY]
                      [-db DATABASE] [--custom-database]
                      [-seqs MAX_TARGET_SEQS] [--tsv] [--remove-spaces]
-                     [--keep-sequences] [-v] -f FILE
+                     [--no-output-sequences] [--no-blast-info] [-v] -f FILE
 
 reCOGnizer - a tool for domain based annotation with the COG database
 
@@ -49,9 +49,11 @@ optional arguments:
   --remove-spaces       BLAST ignores sequences IDs after the first space.
                         This option changes all spaces to underscores to keep
                         the full IDs.
-  --keep-sequences      Protein sequences from the FASTA input will be stored
-                        in their own column. This produces considerably larger
-                        files.
+  --no-output-sequences
+                        Protein sequences from the FASTA input will be stored
+                        in their own column.
+  --no-blast-info       Information from the alignment will be stored in their
+                        own columns.
   -v, --version         show program's version number and exit
 
 required named arguments:
@@ -76,7 +78,7 @@ Krona plot with the quantification of COGs identified in the simulated dataset u
 
 reCOGnizer already has its own image! To use it, just pull the image and run it!
 ```
-docker pull iquasere/recognizer:1.2.3
+docker pull iquasere/recognizer:1.2.4
 docker run -it -v absolute/path/to/fasta_folder:/input_folder /absolute/path/to/output_folder:/output_folder --rm iquasere/recognizer -f /input_folder/input_file.fasta -o /output_folder [other arguments]
 ```
 

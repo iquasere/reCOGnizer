@@ -11,7 +11,7 @@ import pandas as pd
 from time import gmtime, strftime
 import argparse, sys, os, multiprocessing, glob, subprocess, pathlib
 
-__version__ = '1.2.3'
+__version__ = '1.2.4'
 
 def get_arguments():    
     parser = argparse.ArgumentParser(description="reCOGnizer - a tool for domain based annotation with the COG database",
@@ -38,9 +38,12 @@ def get_arguments():
     parser.add_argument("--remove-spaces", action = "store_true", default = False,
                         help="""BLAST ignores sequences IDs after the first space.
                         This option changes all spaces to underscores to keep the full IDs.""")
-    parser.add_argument("--output-sequences", action = "store_true", default = False,
+    parser.add_argument("--no-output-sequences", action = "store_true", default = False,
                         help="""Protein sequences from the FASTA input will be stored
-                        in their own column. This produces considerably larger files.""")
+                        in their own column.""")
+    parser.add_argument("--no-blast-info", action = "store_true", default = False,
+                        help="""Information from the alignment will be stored 
+                        in their own columns.""")           
     parser.add_argument('-v', '--version', action='version', version='reCOGnizer ' + __version__)
     
     requiredNamed = parser.add_argument_group('required named arguments')
@@ -209,19 +212,19 @@ Input:
 Output:
     pandas.DataFrame with CDD IDs converted to COGs and respective categories
 '''
-def cdd2cog(blast, cddid = sys.path[0] + '/Databases/cddid.tbl', 
-            fun = sys.path[0] + '/Databases/fun.txt', 
-            whog = sys.path[0] + '/Databases/whog'):
-    result = pd.read_csv(blast, sep = '\t', header = None)[[0,1]]
-    result.columns = ['qseqid', 'CDD ID']
+def cdd2cog(blast, cddid = sys.path[0] + '/Databases/cddid.tbl'): 
+    blast = pd.read_csv(blast, sep = '\t', header = None)
+    blast.columns = ['qseqid', 'CDD ID', 'pident', 'length', 'mismatch', 'gapopen', 
+                     'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore']
     cddid = parse_cddid(cddid)
+    return pd.merge(blast, cddid, on = 'CDD ID', how = 'left')
+    
+def cogblast2protein2cog(cogblast, fun = sys.path[0] + '/Databases/fun.txt', 
+                         whog = sys.path[0] + '/Databases/whog'):
     fun = parse_fun(fun)
     whog = parse_whog(whog)
     whog = pd.merge(whog, fun, on = 'COG functional category (letter)',  how = 'left')
-    result = pd.merge(result, cddid, on = 'CDD ID', how = 'left')
-    result = pd.merge(result, whog, on = 'cog', how = 'left')
-    return result[['qseqid', 'COG general functional category', 
-                   'COG functional category', 'COG protein description', 'cog']]
+    return pd.merge(cogblast, whog, on = 'cog', how = 'left')
 
 '''
 Input:
@@ -377,32 +380,45 @@ def main():
             
     # run annotation with rps-blast and COG database
     timed_message('Running annotation with RPS-BLAST and COG database as reference.')
-    run_rpsblast(args.file, args.output + '/cdd_aligned.blast', ' '.join(databases),
-                 threads = args.threads, max_target_seqs = args.max_target_seqs)
+    #run_rpsblast(args.file, args.output + '/cdd_aligned.blast', ' '.join(databases),
+    #             threads = args.threads, max_target_seqs = args.max_target_seqs)
     
     # convert CDD IDs to COGs
     timed_message('Converting CDD IDs to respective COG IDs.')
     cogblast = cdd2cog(args.output + '/cdd_aligned.blast',
-                       cddid = args.resources_directory + '/cddid.tbl', 
-                       fun = args.resources_directory + '/fun.txt', 
-                       whog = args.resources_directory + '/whog')
+                       cddid = args.resources_directory + '/cddid.tbl')
+    cogblast.to_csv(args.output + '/cdd_aligned.txt', sep = '\t', index = False)
+    
+    # Add COG categories to BLAST info
+    final_result = cogblast2protein2cog(cogblast, 
+                                fun = args.resources_directory + '/fun.txt', 
+                                whog = args.resources_directory + '/whog')
+    
+    if not args.no_blast_info:
+        final_result = final_result[['qseqid', 'CDD ID', 'COG general functional category', 
+            'COG functional category', 'COG protein description', 'cog', 'pident', 
+            'length', 'mismatch', 'gapopen', 'qstart', 'qend', 'sstart', 'send', 
+            'evalue', 'bitscore']]
+    else:
+        final_result = final_result[['qseqid', 'CDD ID', 'COG general functional category',
+            'COG functional category', 'COG protein description', 'cog']]
     
     # cog2ec
     timed_message('Converting COG IDs to EC numbers.')
-    cogblast = cog2ec(cogblast, table = args.resources_directory + '/cog2ec.tsv',
+    final_result = cog2ec(final_result, table = args.resources_directory + '/cog2ec.tsv',
                       resources_dir = args.resources_directory)
     
     # adding protein sequences if requested
-    if args.output_sequences:
+    if not args.no_output_sequences:
         fasta = parse_fasta(args.file)
         fasta = pd.DataFrame.from_dict(fasta, orient = 'index')
         fasta.columns = ['Sequence']
-        cogblast = pd.merge(cogblast, fasta, left_on = 'qseqid', right_index = True, 
-                            how = 'right')
+        final_result = pd.merge(final_result, fasta, left_on = 'qseqid', 
+                                right_index = True, how = 'right')
     
     # write protein to COG assignment
     out_format = 'tsv' if args.tsv else 'excel'
-    write_table(cogblast,
+    write_table(final_result,
                 args.output + '/protein2cog', 
                 out_format = out_format)
     
@@ -411,7 +427,7 @@ def main():
     
     # quantify COG categories
     timed_message('Quantifying COG categories.')
-    cog_quantification = cogblast.groupby(['COG general functional category',
+    cog_quantification = final_result.groupby(['COG general functional category',
             'COG functional category', 'COG protein description', 'cog']).size(
             ).reset_index().rename(columns={0:'count'})
     write_table(cog_quantification, 
