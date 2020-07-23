@@ -8,11 +8,8 @@ RUN buildDeps='build-essential zlib1g-dev' \
 && conda config --add channels bioconda \
 && conda config --add channels anaconda \
 && git clone https://github.com/iquasere/reCOGnizer.git \
-&& conda install -c anaconda pandas \
-&& conda install -c bioconda blast \
-&& conda install -c anaconda lxml \
-&& conda install -c anaconda openpyxl \
-&& conda install -c bioconda krona \
+&& conda install -c anaconda pandas lxml openpyxl \
+&& conda install -c bioconda blast krona \
 && apt-get purge -y --auto-remove $buildDeps
 
 ENTRYPOINT [ "python", "/reCOGnizer/recognizer.py" ]

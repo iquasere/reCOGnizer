@@ -11,7 +11,7 @@ import pandas as pd
 from time import gmtime, strftime
 import argparse, sys, os, multiprocessing, glob, subprocess, pathlib
 
-__version__ = '1.2.4'
+__version__ = '1.2.5'
 
 def get_arguments():    
     parser = argparse.ArgumentParser(description="reCOGnizer - a tool for domain based annotation with the COG database",
@@ -380,8 +380,8 @@ def main():
             
     # run annotation with rps-blast and COG database
     timed_message('Running annotation with RPS-BLAST and COG database as reference.')
-    #run_rpsblast(args.file, args.output + '/cdd_aligned.blast', ' '.join(databases),
-    #             threads = args.threads, max_target_seqs = args.max_target_seqs)
+    run_rpsblast(args.file, args.output + '/cdd_aligned.blast', ' '.join(databases),
+                 threads = args.threads, max_target_seqs = args.max_target_seqs)
     
     # convert CDD IDs to COGs
     timed_message('Converting CDD IDs to respective COG IDs.')
