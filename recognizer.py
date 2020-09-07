@@ -11,7 +11,7 @@ import pandas as pd
 from time import gmtime, strftime
 import argparse, sys, os, multiprocessing, glob, subprocess, pathlib
 
-__version__ = '1.2.5'
+__version__ = '1.3.0'
 
 def get_arguments():    
     parser = argparse.ArgumentParser(description="reCOGnizer - a tool for domain based annotation with the COG database",
@@ -313,9 +313,35 @@ def cog2ec(cogblast, table = sys.path[0] + '/Databases/cog2ec.tsv',
         download_eggnog_files(directory = resources_dir)
         run_command('python {0}/cog2ec.py -c {0}/eggnog4.protein_id_conversion.tsv -m {0}/NOG.members.tsv'.format(
                 resources_dir), stdout = open(table, 'w'))
-    cog2ec = pd.read_csv(table, sep = '\t', names = ['cog', 'EC number'])
-    return pd.merge(cogblast, cog2ec, on = 'cog', how = 'left')
+    return pd.merge(cogblast, pd.read_csv(table, sep = '\t', 
+                    names = ['cog', 'EC number']), on = 'cog', how = 'left')
 
+'''
+Input:
+Output:
+'''
+def cog2ko(cogblast, cog2ko = os.path.expanduser('~/resources_directory/cog2ko.ssv')):
+    if not os.path.isfile(cog2ko):
+        directory = '/'.join(cog2ko.split('/')[:-1])
+        web_locations = {
+            'COG.mappings.v11.0.txt':'https://stringdb-static.org/download/COG.mappings.v11.0.txt.gz',
+            'protein.info.v11.0.txt':'https://stringdb-static.org/download/protein.info.v11.0.txt.gz'}
+        for file in web_locations.keys():
+            if not os.path.isfile(file):
+                run_command('wget -P {} {}'.format(directory, web_locations[file]))
+                run_command('gunzip {}/{}.gz'.format(directory, file))
+        run_pipe_command("""grep -E 'K[0-9]{5}$' protein.info.v11.0.txt | 
+                         awk '{{if (length($NF) == 6) print $1, $NF}}'""", 
+                         file = '{}/string2ko.tsv'.format(directory))
+        run_pipe_command("""awk '{{if (length($4) == 7) print $1"\t"$4}}' COG.mappings.v11.0.txt | 
+                         sort | join - {}/string2ko.tsv""".format(directory), 
+                         file = '{}/cog2ko.ssv'.format(directory))
+        df = pd.read_csv('{}/cog2ko.ssv'.format(directory),sep=' ', 
+                         names = ['StringDB','COG','KO'])
+        df[['cog', 'KO']].groupby('cog')['KO'].agg([('KO', ','.join)]).reset_index().to_csv(
+            '{}/cog2ko.tsv'.format(directory), sep = '\t', index = False)
+    return pd.merge(cogblast, pd.read_csv(cog2ko, sep = '\t'), on = 'cog', how = 'left')
+    
 '''
 Input:
     table: pandas.DataFrame - table to write
@@ -387,7 +413,6 @@ def main():
     timed_message('Converting CDD IDs to respective COG IDs.')
     cogblast = cdd2cog(args.output + '/cdd_aligned.blast',
                        cddid = args.resources_directory + '/cddid.tbl')
-    cogblast.to_csv(args.output + '/cdd_aligned.txt', sep = '\t', index = False)
     
     # Add COG categories to BLAST info
     final_result = cogblast2protein2cog(cogblast, 
@@ -408,13 +433,17 @@ def main():
     final_result = cog2ec(final_result, table = args.resources_directory + '/cog2ec.tsv',
                       resources_dir = args.resources_directory)
     
+    # cog2ko
+    timed_message('Converting COG IDs to KEGG Orthologs.')
+    final_result = cog2ko(final_result, cog2ko = args.resources_directory + '/cog2ko.tsv')
+    
     # adding protein sequences if requested
     if not args.no_output_sequences:
         fasta = parse_fasta(args.file)
         fasta = pd.DataFrame.from_dict(fasta, orient = 'index')
         fasta.columns = ['Sequence']
         final_result = pd.merge(final_result, fasta, left_on = 'qseqid', 
-                                right_index = True, how = 'right')
+                                right_index = True, how = 'left')
     
     # write protein to COG assignment
     out_format = 'tsv' if args.tsv else 'excel'
