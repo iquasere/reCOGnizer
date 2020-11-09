@@ -9,9 +9,9 @@ Nov 2019
 
 import pandas as pd
 from time import gmtime, strftime
-import argparse, sys, os, multiprocessing, glob, subprocess, pathlib
+import argparse, sys, os, multiprocessing, glob, subprocess, pathlib, shutil
 
-__version__ = '1.3.0'
+__version__ = '1.3.1'
 
 def get_arguments():    
     parser = argparse.ArgumentParser(description="reCOGnizer - a tool for domain based annotation with the COG database",
@@ -123,8 +123,15 @@ def download_resources(database_directory):
             run_command('wget ftp://ftp.ncbi.nih.gov/pub/mmdb/cdd/cdd.tar.gz -P {}'.format(database_directory))
         wd = os.getcwd()
         os.chdir(database_directory)
-        print('tar -xzf {}/cdd.tar.gz --wildcards "COG*.smp"'.format(database_directory))
-        subprocess.Popen('tar -xzf cdd.tar.gz --wildcards "COG*.smp"', shell = True).communicate() # I couldn't, for the life of me, put the -C or --directory flags to work. No idea what happened, this just works
+        if sys.platform == "darwin":
+            if shutil.which('gtar') is None:
+                run_command('brew install gnu-tar')
+            tool = 'gtar'
+        else:
+            tool = 'tar'
+        download_cdd_command = '{} -xzf {}/cdd.tar.gz --wildcards "COG*.smp"'.format(tool, database_directory)
+        print(download_cdd_command)
+        subprocess.Popen(download_cdd_command, shell = True).communicate()                      # I couldn't, for the life of me, put the -C or --directory flags to work. No idea what happened, this just works
         os.chdir(wd)
     if not os.path.isfile('{}/cddid.tbl'.format(database_directory)):
         print('{}/cddid.tbl not found! Downloading...'.format(database_directory))
@@ -320,7 +327,7 @@ def cog2ec(cogblast, table = sys.path[0] + '/Databases/cog2ec.tsv',
 Input:
 Output:
 '''
-def cog2ko(cogblast, cog2ko = os.path.expanduser('~/resources_directory/cog2ko.ssv')):
+def cog2ko(cogblast, cog2ko = sys.path[0] + '/Databases/cog2ko.ssv'):
     if not os.path.isfile(cog2ko):
         directory = '/'.join(cog2ko.split('/')[:-1])
         web_locations = {
@@ -384,8 +391,9 @@ def main():
         else:
             databases = args.database.split(',')
         for database in databases:
-            if not validate_database(args.database):
+            if not validate_database(database):
                 exit('Database not valid!')
+            print('{} is valid database'.format(database))
     else:
         # check if necessary files exist to build database
         download_resources(args.resources_directory) 
