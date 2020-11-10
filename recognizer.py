@@ -86,7 +86,14 @@ def run_command(bashCommand, print_command = True, stdout = None):
 def run_pipe_command(bashCommand, file = '', mode = 'w', sep = ' ', print_message = True):
     if print_message:
         print(bashCommand)
-    subprocess.Popen(bashCommand, stdin=subprocess.PIPE, shell=True).communicate()
+    if file == '':
+        subprocess.Popen(bashCommand, stdin=subprocess.PIPE, shell=True).communicate()
+    elif file == 'PIPE':
+        return subprocess.Popen(bashCommand, stdin=subprocess.PIPE, shell=True,
+                                stdout=subprocess.PIPE).communicate()[0].decode('utf8')
+    else:
+        with open(file, mode) as output_file:
+            subprocess.Popen(bashCommand, stdin=subprocess.PIPE, shell=True, stdout=output_file).communicate()
 
 '''
 Input:
@@ -334,19 +341,17 @@ def cog2ko(cogblast, cog2ko = sys.path[0] + '/Databases/cog2ko.ssv'):
             'COG.mappings.v11.0.txt':'https://stringdb-static.org/download/COG.mappings.v11.0.txt.gz',
             'protein.info.v11.0.txt':'https://stringdb-static.org/download/protein.info.v11.0.txt.gz'}
         for file in web_locations.keys():
-            if not os.path.isfile(file):
+            if not os.path.isfile('{}/{}'.format(directory, file)):
                 run_command('wget -P {} {}'.format(directory, web_locations[file]))
                 run_command('gunzip {}/{}.gz'.format(directory, file))
-        run_pipe_command("""grep -E 'K[0-9]{5}$' {}/protein.info.v11.0.txt | 
-                         awk '{{if (length($NF) == 6) print $1, $NF}}'""".format(directory),
+        run_pipe_command("""grep -E 'K[0-9]{5}$' """ + directory + """/protein.info.v11.0.txt | awk '{{if (length($NF) == 6) print $1, $NF}}'""",
                          file = '{}/string2ko.tsv'.format(directory))
-        run_pipe_command("""awk '{{if (length($4) == 7) print $1"\t"$4}}' {0}/COG.mappings.v11.0.txt | 
-                         sort | join - {0}/string2ko.tsv""".format(directory),
+        run_pipe_command("""awk '{{if (length($4) == 7) print $1"\t"$4}}' {0}/COG.mappings.v11.0.txt | sort | join - {0}/string2ko.tsv""".format(directory),
                          file = '{}/cog2ko.ssv'.format(directory))
         df = pd.read_csv('{}/cog2ko.ssv'.format(directory),sep=' ', 
                          names = ['StringDB','COG','KO'])
-        df[['cog', 'KO']].groupby('cog')['KO'].agg([('KO', ','.join)]).reset_index().to_csv(
-            '{}/cog2ko.tsv'.format(directory), sep = '\t', index = False)
+        df[['COG', 'KO']].groupby('COG')['KO'].agg([('KO', ','.join)]).reset_index().to_csv('{}/cog2ko.tsv'.format(
+            directory), sep = '\t', index = False, header = ['cog', 'KO'])
     return pd.merge(cogblast, pd.read_csv(cog2ko, sep = '\t'), on = 'cog', how = 'left')
     
 '''
