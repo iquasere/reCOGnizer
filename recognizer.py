@@ -337,11 +337,11 @@ def cog2ko(cogblast, cog2ko = sys.path[0] + '/Databases/cog2ko.ssv'):
             if not os.path.isfile(file):
                 run_command('wget -P {} {}'.format(directory, web_locations[file]))
                 run_command('gunzip {}/{}.gz'.format(directory, file))
-        run_pipe_command("""grep -E 'K[0-9]{5}$' protein.info.v11.0.txt | 
-                         awk '{{if (length($NF) == 6) print $1, $NF}}'""", 
+        run_pipe_command("""grep -E 'K[0-9]{5}$' {}/protein.info.v11.0.txt | 
+                         awk '{{if (length($NF) == 6) print $1, $NF}}'""".format(directory),
                          file = '{}/string2ko.tsv'.format(directory))
-        run_pipe_command("""awk '{{if (length($4) == 7) print $1"\t"$4}}' COG.mappings.v11.0.txt | 
-                         sort | join - {}/string2ko.tsv""".format(directory), 
+        run_pipe_command("""awk '{{if (length($4) == 7) print $1"\t"$4}}' {0}/COG.mappings.v11.0.txt | 
+                         sort | join - {0}/string2ko.tsv""".format(directory),
                          file = '{}/cog2ko.ssv'.format(directory))
         df = pd.read_csv('{}/cog2ko.ssv'.format(directory),sep=' ', 
                          names = ['StringDB','COG','KO'])
