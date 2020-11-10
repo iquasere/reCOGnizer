@@ -11,7 +11,7 @@ import pandas as pd
 from time import gmtime, strftime
 import argparse, sys, os, multiprocessing, glob, subprocess, pathlib, shutil
 
-__version__ = '1.3.1'
+__version__ = '1.3.2'
 
 def get_arguments():    
     parser = argparse.ArgumentParser(description="reCOGnizer - a tool for domain based annotation with the COG database",
