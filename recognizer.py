@@ -381,8 +381,7 @@ def create_krona_plot(tsv, output = None):
     if output is None:
         output = tsv.replace('.tsv','.html')
     conda_exec = subprocess.check_output('which conda'.split()).decode('utf8')
-    run_command('{}/bin/ktImportText {} -o {}'.format(
-            conda_exec.split('/bin')[0], tsv, output))
+    run_command('ktImportText {} -o {}'.format(conda_exec.split('/bin')[0], tsv, output))
 
 def main():
     
