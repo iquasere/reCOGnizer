@@ -14,6 +14,7 @@ CELLULAR PROCESSES AND SIGNALING	Cytoskeleton 	Z
 CELLULAR PROCESSES AND SIGNALING	Extracellular structures 	W
 CELLULAR PROCESSES AND SIGNALING	Intracellular trafficking, secretion, and vesicular transport 	U
 CELLULAR PROCESSES AND SIGNALING	Posttranslational modification, protein turnover, chaperones 	O
+CELLULAR PROCESSES AND SIGNALING	Mobilome: prophages, transposons	X
 METABOLISM	Energy production and conversion 	C
 METABOLISM	Carbohydrate transport and metabolism 	G
 METABOLISM	Amino acid transport and metabolism 	E
@@ -24,4 +25,3 @@ METABOLISM	Inorganic ion transport and metabolism 	P
 METABOLISM	Secondary metabolites biosynthesis, transport and catabolism 	Q
 POORLY CHARACTERIZED	General function prediction only 	R
 POORLY CHARACTERIZED	Function unknown 	S
-CELLULAR PROCESSES AND SIGNALING	Mobilome: prophages, transposons	X

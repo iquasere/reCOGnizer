@@ -10,6 +10,7 @@ Nov 2019
 import pandas as pd
 from time import gmtime, strftime
 import argparse, sys, os, multiprocessing, glob, subprocess, pathlib, shutil
+from multiprocessing import Pool
 
 __version__ = '1.4.0'
 
@@ -24,11 +25,17 @@ def get_arguments():
                         Default is number of CPUs available minus 2.""")
     parser.add_argument("-o", "--output", type=str, help="Output directory",
                         default='reCOGnizer_results'),
+    parser.add_argument("-dr", "--download-resources", default=False, action="store_true",
+                        help='If resources for reCOGnizer are not available at "resources_directory"')
     parser.add_argument("-rd", "--resources-directory", type=str,
-                        help="Output directory for storing COG databases and other resources",
-                        default=sys.path[0] + '/Databases')
+                        help="Output directory for storing databases and other resources",
+                        default=sys.path[0] + '/resources_directory')
+    parser.add_argument("-dbs", "--databases", type=str, nargs='+',
+                        choices=["CDD", "Pfam", "NCBIfam", "Protein_Clusters", "Smart", "TIGRFAM"],
+                        default=["CDD", "Pfam", "NCBIfam", "Protein_Clusters", "Smart", "TIGRFAM"],
+                        help="Databases to include in functional annotation")
     parser.add_argument("-db", "--database", type=str,
-                        help="""Basename of COG database for annotation. 
+                        help="""Basename of database for annotation. 
                         If multiple databases, use comma separated list (db1,db2,db3)""")
     parser.add_argument("--custom-database", action="store_true", default=False,
                         help="If database was NOT produced by reCOGnizer")
@@ -110,17 +117,22 @@ def download_resources(directory):
         'ftp://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/cddid.tbl.gz',
         # COG categories
         'ftp.ncbi.nlm.nih.gov/pub/COG/COG2020/data/fun-20.tab',
-        'ftp://ftp.ncbi.nlm.nih.gov/pub/COG/COG/whog',
+        'ftp.ncbi.nlm.nih.gov/pub/COG/COG2020/data/cog-20.def.tab',
         # COG2EC
         'https://bitbucket.org/scilifelab-lts/lts-workflows-sm-metagenomics/raw/screening_legacy/lts_workflows_sm_metagenomics/source/utils/cog2ec.py',
         'http://eggnogdb.embl.de/download/eggnog_4.5/eggnog4.protein_id_conversion.tsv.gz',
         'http://eggnogdb.embl.de/download/eggnog_4.5/data/NOG/NOG.members.tsv.gz',
-
+        # TIGRFAM
+        #'https://ftp.ncbi.nlm.nih.gov/hmm/TIGRFAMs/TIGRFAMs_improvements_2018-10-11.tsv',
+        # NCBIfam, TIGRFAM, Pfam, PRK (protein clusters)
+        'https://ftp.ncbi.nlm.nih.gov/hmm/4.0/hmm_PGAP.tsv',
+        # SMART
+        'https://smart.embl.de/smart/descriptions.pl'
     ]:
         run_command('wget {} -P {}'.format(location, directory))
 
     for file in ['cddid.tbl', 'eggnog4.protein_id_conversion.tsv', 'NOG.members.tsv']:
-        run_command('gunzip {}/{}.gz'.format(file, directory))
+        run_command('gunzip {}/{}.gz'.format(directory, file))
 
     # Extract the smps
     if sys.platform == "darwin":
@@ -131,74 +143,73 @@ def download_resources(directory):
         tool = 'tar'
     wd = os.getcwd()
     os.chdir(directory)
-    run_command('{} -xzf {}/cdd.tar.gz --wildcards "*.smp"'.format(tool, directory))
+    run_command('{} -xzf cdd.tar.gz --wildcards "*.smp"'.format(tool))
     os.chdir(wd)
 
-def run_rpsblast(fasta, output, cog, threads='0', max_target_seqs='1'):
-    subprocess.run('rpsblast -query {} -db {} -out {} -outfmt 6 -num_threads {} -max_target_seqs {}'.format(
-        fasta, cog, output, threads, max_target_seqs))
+
+def run_rpsblast(query, output, reference, threads='0', max_target_seqs='1'):
+    # This run_command is different because of reference, which can't be split by space
+    bashCommand = ['rpsblast', '-query', query, '-db', reference, '-out', output, '-outfmt', '6',
+                   '-num_threads', threads, '-max_target_seqs', max_target_seqs]
+    print(' '.join(bashCommand))
+    subprocess.run(bashCommand)
+
+
+'''
+Handling COG
+'''
 
 
 def parse_cddid(cddid):
-    cddid = pd.read_csv(cddid, sep='\t', header=None)[[0, 1]]
-    cddid.columns = ['CDD ID', 'cog']
+    cddid = pd.read_csv(cddid, sep='\t', header=None)[[0, 1, 3]]
+    cddid.columns = ['CDD ID', 'DB ID', 'DB description']
     cddid['CDD ID'] = ['CDD:{}'.format(str(ide)) for ide in cddid['CDD ID']]
-    return cddid[cddid['cog'].str.startswith('COG')]
-
-
-def parse_fun(fun):
-    lines = open(fun).readlines()
-    result = dict()
-    supercategory = lines[0]
-    i = 1
-    while i < len(lines):
-        line = lines[i].rstrip('\n')
-        if '[' in line:
-            letter = line.split('[')[-1].split(']')[0]
-            name = line.split('] ')[-1]
-            result[letter] = [supercategory.rstrip('\n'), name]
-        else:
-            supercategory = line
-        i += 1
-    result = pd.DataFrame.from_dict(result).transpose().reset_index()
-    result.columns = ['COG functional category (letter)',
-                      'COG general functional category', 'COG functional category']
-    return result
+    return cddid
 
 
 def parse_whog(whog):
-    lines = list()
-    for line in [line.rstrip('\n') for line in open(whog).readlines() if line.startswith('[')]:
-        line = line.split()
-        lines.append([line[0][1], line[1], ' '.join(line[2:])])
-    df = pd.DataFrame(lines)
-    df.columns = ['COG functional category (letter)', 'cog', 'COG protein description']
+    df = pd.read_csv(whog, sep='\t', usecols=[0, 1, 2])
+    df.columns = ['cog', 'COG functional category (letter)', 'COG protein description']
     return df
 
 
-def cdd2cog(blast, cddid=sys.path[0] + '/Databases/cddid.tbl'):
+def parse_blast(file):
+    blast = pd.read_csv(file, sep='\t', header=None)
+    blast.columns = ['qseqid', 'CDD ID', 'pident', 'length', 'mismatch', 'gapopen',
+                     'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore']
+    return blast
+
+
+def cdd2id(blast, cddid=sys.path[0] + '/resources_directory/cddid.tbl'):
     """
     Input:
         blast: str - filename of blast outputted by RPS-BLAST with CDD identifications
     Output:
         pandas.DataFrame with CDD IDs converted to COGs and respective categories
     """
-    blast = pd.read_csv(blast, sep='\t', header=None)
-    blast.columns = ['qseqid', 'CDD ID', 'pident', 'length', 'mismatch', 'gapopen',
-                     'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore']
+    blast = parse_blast(blast)
     cddid = parse_cddid(cddid)
     return pd.merge(blast, cddid, on='CDD ID', how='left')
 
 
-def cogblast2protein2cog(cogblast, fun=sys.path[0] + '/Databases/fun.txt',
-                         whog=sys.path[0] + '/Databases/whog'):
-    fun = parse_fun(fun)
+def cogblast2protein2cog(cogblast, fun=sys.path[0] + '/resources_directory/fun.tsv',
+                         whog=sys.path[0] + '/resources_directory/cog-20.def.tab'):
+    fun = pd.read_csv(fun, sep='\t')
     whog = parse_whog(whog)
     whog = pd.merge(whog, fun, on='COG functional category (letter)', how='left')
     return pd.merge(cogblast, whog, on='cog', how='left')
 
 
-def create_split_cog_db(smp_directory, output, threads='12'):
+def pn2database(pn):
+    run_command('makeprofiledb -in {0} -title {1} -out {1}'.format(pn, pn.split('.pn')[0]))
+
+
+def split(a, n):
+    k, m = divmod(len(a), n)
+    return (a[i * k + min(i, m):(i + 1) * k + min(i + 1, m)] for i in range(n))
+
+
+def create_split_db(smp_directory, output, db_prefix, threads='12'):
     """
     Input:
         smp_directory: foldername where the SMP files are. These files are
@@ -211,49 +222,35 @@ def create_split_cog_db(smp_directory, output, threads='12'):
         the list of SMP files available. These databases are formated for RPS-BLAST
         search
     """
+    print('Generating databases for [{}] threads.'.format(threads))
+    smp_list = glob.glob('{}/{}*.smp'.format(smp_directory, db_prefix))
+    print(smp_list[:100])
+    parts = list(split(smp_list, int(threads)))
+    for i in range(len(parts)):
+        with open('{}/{}_{}_{}.pn'.format(output, db_prefix, threads, i), 'w') as f:
+            f.write('\n'.join(parts[i]))
 
-    def split(a, n):
-        k, m = divmod(len(a), n)
-        return (a[i * k + min(i, m):(i + 1) * k + min(i + 1, m)] for i in range(n))
-
-    database_reporter = '/'.join(output.split('/')[:-1]) + '/databases.txt'
-    dbs = (open(database_reporter).read().split('\n') if
-           os.path.isfile(database_reporter) else list())
-    if threads in dbs:
-        print('Already built COG database for [' + threads + '] threads.')
-    else:
-        print('Generating COG databases for [' + threads + '] threads.')
-        smp_list = glob.glob(smp_directory + '/COG*.smp')
-        parts = list(split(smp_list, int(threads)))
-        for i in range(len(parts)):
-            with open('{}_{}_{}.pn'.format(output, threads, str(i)), 'w') as f:
-                f.write('\n'.join(parts[i]))
-
-        for file in ['{}_{}_{}.pn'.format(output, threads, str(i)) for i in range(len(parts))]:
-            run_command('makeprofiledb -in {0} -title {1} -out {1}'.format(
-                # -title and -out options are defaulted as input file name to -in argument; -dbtype default is 'rps'
-                file, file.split('.pn')[0]))
-
-        with open(database_reporter, 'w') as dr:
-            dr.write('\n'.join(dbs + [threads]))
+    pool = Pool()
+    pool.map(pn2database, ['{}/{}_{}_{}.pn'.format(output, db_prefix, threads, i) for i in range(len(parts))])
 
 
 def validate_database(database):
     for ext in ['aux', 'freq', 'loo', 'phr', 'pin', 'pn', 'psd', 'psi', 'psq', 'rps']:
         if not os.path.isfile('{}.{}'.format(database, ext)):
+            print('{}.{}'.format(database, ext))
             return False
     return True
 
 
-def cog2ec(cogblast, table=sys.path[0] + '/Databases/cog2ec.tsv', resources_dir=sys.path[0] + '/Databases'):
+def cog2ec(cogblast, table=sys.path[0] + '/resources_directory/cog2ec.tsv',
+           resources_dir=sys.path[0] + '/resources_directory'):
     if not os.path.isfile(table):
-        download_eggnog_files(directory=resources_dir)
         run_command('python {0}/cog2ec.py -c {0}/eggnog4.protein_id_conversion.tsv -m {0}/NOG.members.tsv'.format(
             resources_dir), stdout=open(table, 'w'))
     return pd.merge(cogblast, pd.read_csv(table, sep='\t', names=['cog', 'EC number']), on='cog', how='left')
 
 
-def cog2ko(cogblast, cog2ko=sys.path[0] + '/Databases/cog2ko.ssv'):
+def cog2ko(cogblast, cog2ko=sys.path[0] + '/resources_directory/cog2ko.ssv'):
     if not os.path.isfile(cog2ko):
         directory = '/'.join(cog2ko.split('/')[:-1])
         web_locations = {
@@ -295,48 +292,104 @@ def main():
     # get arguments
     args = get_arguments()
 
-    if args.database:
-        if not args.custom_database:  # if database was built by reCOGnizer
-            args.threads = int(args.database.split('_')[-1])
-            databases = ['{}_{}'.format(args.database, str(i)) for i in range(args.threads)]
-        else:
-            databases = args.database.split(',')
-        for database in databases:
-            if not validate_database(database):
-                exit('Database not valid!')
-            print('{} is valid database'.format(database))
-    else:
-        # check if necessary files exist to build database
+    if args.download_resources:
         download_resources(args.resources_directory)
 
-        # create database if it doesn't exit
-        timed_message('Checking if database exists for {} threads.'.format(args.threads))
-        create_split_cog_db(args.resources_directory,
-                            args.resources_directory + '/COG', args.threads)
+    if args.database:   # if database was inputted
+        inputted_db = True
+        database_groups = args.database.split(',')
+        for database in database_groups:
+            if not validate_database(database):
+                exit('Some inputted database was not valid!')
+    else:
+        inputted_db = False
 
-        # set database(s)
-        databases = [pn.split('.pn')[0] for pn in glob.glob('{}/COG_{}_*.pn'.format(
-            args.resources_directory, args.threads))]
+        database_groups = list()
+        databases_prefixes = {'CDD': 'cd',
+                              'Pfam': 'pfam',
+                              'NCBIfam': 'NF',
+                              'Protein_Clusters': 'PRK',
+                              'Smart': 'smart',
+                              'TIGRFAM': 'TIGR'}
+
+        for base in args.databases:
+            database_group = ['{}/{}_{}_{}'.format(args.resources_directory, databases_prefixes[base], args.threads,
+                                                str(i)) for i in range(int(args.threads))]
+            remake_dbs = False
+
+            i = 0
+            while not remake_dbs and i < len(database_group):
+                if not validate_database(database_group[i]):
+                    print('Some part of {} was not valid!'.format(base))
+                    remake_dbs = True
+                i += 1
+
+            if remake_dbs:
+                # create database if it doesn't exit
+                create_split_db(args.resources_directory, args.resources_directory,
+                                databases_prefixes[base], args.threads)
+            else:
+                print('A valid {} split database for [{}] threads was found!'.format(base, args.threads))
+
+            database_groups.append((base, database_group))
 
     # Replacing spaces for commas
     timed_message('Replacing spaces for commas')
     if args.remove_spaces:
         run_pipe_command("sed -i -e 's/ /_/g' {}".format(args.file))
 
-    # run annotation with rps-blast and COG database
-    timed_message('Running annotation with RPS-BLAST and COG database as reference.')
-    run_rpsblast(args.file, args.output + '/cdd_aligned.blast', ' '.join(databases),
-                 threads=args.threads, max_target_seqs=args.max_target_seqs)
+    if inputted_db:
+        # run annotation with rps-blast and database
+        timed_message('Running annotation with RPS-BLAST and inputted database as reference.')
+        run_rpsblast(args.file, '{}/aligned.blast'.format(args.output, ), ' '.join(database_groups),
+                     threads=args.threads, max_target_seqs=args.max_target_seqs)
+    else:
+        for db_group in database_groups:
+            # run annotation with rps-blast and database
+            timed_message('Running annotation with RPS-BLAST and {} database as reference.'.format(db_group[0]))
+            run_rpsblast(args.file, '{}/{}_aligned.blast'.format(args.output, db_group[0]), ' '.join(db_group[1]),
+                         threads=args.threads, max_target_seqs=args.max_target_seqs)
+    if inputted_db:
+        exit()
 
-    # convert CDD IDs to COGs
-    timed_message('Converting CDD IDs to respective COG IDs.')
-    cogblast = cdd2cog(args.output + '/cdd_aligned.blast',
-                       cddid=args.resources_directory + '/cddid.tbl')
+    cddid = parse_cddid('{}/cddid.tbl'.format(args.resources_directory))
+    for db in args.databases:
+        db_report = parse_blast('{}/{}_aligned.blast'.format(args.output, db))
+        db_report = pd.merge(db_report, cddid, left_on='sseqid', right_on='CDD ID', how='left')
+        db_report.to_csv('{}/{}_report.tsv'.format(args.output, db), sep='\t', index=False)
 
-    # Add COG categories to BLAST info
-    final_result = cogblast2protein2cog(cogblast,
-                                        fun=args.resources_directory + '/fun.txt',
-                                        whog=args.resources_directory + '/whog')
+    ncbi_table = pd.read_csv('hmm_PGAP.tsv', sep='\t', usecols=[1, 10, 12, 15])
+    for db in ['CDD', 'Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
+        if db in args.databases:
+            report = pd.read_csv('{}/{}_report.tsv'.format(args.output, db), sep='\t')
+            # TODO - acertar os nomes/prefixos/ids - os do hmm_PGAP têm de ser relacionados com os dos reports
+
+
+    if 'Smart' in args.databases:
+        smart_table = pd.read_csv('{}/descriptions.pl'.format(args.resources_directory), sep='\t', skiprows=2,
+                                  header=None)
+
+
+    if 'TIGRFAM' in args.databases:
+        pass
+
+    if 'KOG' in args.databases:
+        pass
+    '''
+    if 'COG' in args.databases:
+        # Add COG categories to BLAST info
+        final_result = cogblast2protein2cog(cogblast,
+                                            fun=args.resources_directory + '/fun.tsv',
+                                            whog=args.resources_directory + '/cog-20.def.tab')
+
+        # cog2ec
+        timed_message('Converting COG IDs to EC numbers.')
+        final_result = cog2ec(final_result, table=args.resources_directory + '/cog2ec.tsv',
+                              resources_dir=args.resources_directory)
+
+        # cog2ko
+        timed_message('Converting COG IDs to KEGG Orthologs.')
+        final_result = cog2ko(final_result, cog2ko=args.resources_directory + '/cog2ko.tsv')
 
     if not args.no_blast_info:
         final_result = final_result[['qseqid', 'CDD ID', 'COG general functional category',
@@ -347,14 +400,7 @@ def main():
         final_result = final_result[['qseqid', 'CDD ID', 'COG general functional category',
                                      'COG functional category', 'COG protein description', 'cog']]
 
-    # cog2ec
-    timed_message('Converting COG IDs to EC numbers.')
-    final_result = cog2ec(final_result, table=args.resources_directory + '/cog2ec.tsv',
-                          resources_dir=args.resources_directory)
 
-    # cog2ko
-    timed_message('Converting COG IDs to KEGG Orthologs.')
-    final_result = cog2ko(final_result, cog2ko=args.resources_directory + '/cog2ko.tsv')
 
     # adding protein sequences if requested
     if not args.no_output_sequences:
@@ -391,7 +437,7 @@ def main():
                 header=False,
                 out_format='tsv')
     create_krona_plot(args.output + '/krona.tsv', args.output + '/cog_quantification.html')
-
+    '''
 
 if __name__ == '__main__':
     main()
