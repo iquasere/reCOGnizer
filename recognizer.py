@@ -7,10 +7,19 @@ By João Sequeira
 Nov 2019
 """
 
-import pandas as pd
-from time import gmtime, strftime
-import argparse, sys, os, multiprocessing, glob, subprocess, pathlib, shutil
+import argparse
+import glob
+import multiprocessing
+import os
+import pathlib
+import shutil
+import subprocess
+import sys
 from multiprocessing import Pool
+from time import gmtime, strftime
+
+import pandas as pd
+from progressbar import ProgressBar
 
 __version__ = '1.4.0'
 
@@ -31,8 +40,8 @@ def get_arguments():
                         help="Output directory for storing databases and other resources",
                         default=sys.path[0] + '/resources_directory')
     parser.add_argument("-dbs", "--databases", type=str, nargs='+',
-                        choices=["CDD", "Pfam", "NCBIfam", "Protein_Clusters", "Smart", "TIGRFAM"],
-                        default=["CDD", "Pfam", "NCBIfam", "Protein_Clusters", "Smart", "TIGRFAM"],
+                        choices=["CDD", "Pfam", "NCBIfam", "Protein_Clusters", "Smart", "TIGRFAM", "COG", "KOG"],
+                        default=["CDD", "Pfam", "NCBIfam", "Protein_Clusters", "Smart", "TIGRFAM", "COG", "KOG"],
                         help="Databases to include in functional annotation")
     parser.add_argument("-db", "--database", type=str,
                         help="""Basename of database for annotation. 
@@ -114,7 +123,7 @@ def download_resources(directory):
     for location in [
         # Download CDD
         'ftp://ftp.ncbi.nih.gov/pub/mmdb/cdd/cdd.tar.gz',
-        'ftp://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/cddid.tbl.gz',
+        'https://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/cddid_all.tbl.gz',
         # COG categories
         'ftp.ncbi.nlm.nih.gov/pub/COG/COG2020/data/fun-20.tab',
         'ftp.ncbi.nlm.nih.gov/pub/COG/COG2020/data/cog-20.def.tab',
@@ -122,16 +131,16 @@ def download_resources(directory):
         'https://bitbucket.org/scilifelab-lts/lts-workflows-sm-metagenomics/raw/screening_legacy/lts_workflows_sm_metagenomics/source/utils/cog2ec.py',
         'http://eggnogdb.embl.de/download/eggnog_4.5/eggnog4.protein_id_conversion.tsv.gz',
         'http://eggnogdb.embl.de/download/eggnog_4.5/data/NOG/NOG.members.tsv.gz',
-        # TIGRFAM
-        #'https://ftp.ncbi.nlm.nih.gov/hmm/TIGRFAMs/TIGRFAMs_improvements_2018-10-11.tsv',
         # NCBIfam, TIGRFAM, Pfam, PRK (protein clusters)
         'https://ftp.ncbi.nlm.nih.gov/hmm/4.0/hmm_PGAP.tsv',
         # SMART
-        'https://smart.embl.de/smart/descriptions.pl'
+        'https://smart.embl.de/smart/descriptions.pl',
+        # KOG
+        'https://ftp.ncbi.nlm.nih.gov/pub/COG/KOG/kog'
     ]:
         run_command('wget {} -P {}'.format(location, directory))
 
-    for file in ['cddid.tbl', 'eggnog4.protein_id_conversion.tsv', 'NOG.members.tsv']:
+    for file in ['cddid_all.tbl', 'eggnog4.protein_id_conversion.tsv', 'NOG.members.tsv']:
         run_command('gunzip {}/{}.gz'.format(directory, file))
 
     # Extract the smps
@@ -168,19 +177,29 @@ def parse_cddid(cddid):
 
 
 def parse_whog(whog):
-    df = pd.read_csv(whog, sep='\t', usecols=[0, 1, 2])
+    df = pd.read_csv(whog, sep='\t', usecols=[0, 1, 2], header=None, encoding='ISO 8859-1')
     df.columns = ['cog', 'COG functional category (letter)', 'COG protein description']
+    return df
+
+
+def parse_kog(kog):
+    lines = list()
+    for line in [line.rstrip('\n') for line in open(kog).readlines() if line.startswith('[')]:
+        line = line.split()
+        lines.append([line[0][1], line[1], ' '.join(line[2:])])
+    df = pd.DataFrame(lines)
+    df.columns = ['KOG functional category (letter)', 'kog', 'KOG protein description']
     return df
 
 
 def parse_blast(file):
     blast = pd.read_csv(file, sep='\t', header=None)
-    blast.columns = ['qseqid', 'CDD ID', 'pident', 'length', 'mismatch', 'gapopen',
+    blast.columns = ['qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen',
                      'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore']
     return blast
 
 
-def cdd2id(blast, cddid=sys.path[0] + '/resources_directory/cddid.tbl'):
+def cdd2id(blast, cddid=sys.path[0] + '/resources_directory/cddid_all.tbl'):
     """
     Input:
         blast: str - filename of blast outputted by RPS-BLAST with CDD identifications
@@ -189,7 +208,7 @@ def cdd2id(blast, cddid=sys.path[0] + '/resources_directory/cddid.tbl'):
     """
     blast = parse_blast(blast)
     cddid = parse_cddid(cddid)
-    return pd.merge(blast, cddid, on='CDD ID', how='left')
+    return pd.merge(blast, cddid, left_on='sseqid', right_on='CDD ID', how='left')
 
 
 def cogblast2protein2cog(cogblast, fun=sys.path[0] + '/resources_directory/fun.tsv',
@@ -237,7 +256,7 @@ def create_split_db(smp_directory, output, db_prefix, threads='12'):
 def validate_database(database):
     for ext in ['aux', 'freq', 'loo', 'phr', 'pin', 'pn', 'psd', 'psi', 'psq', 'rps']:
         if not os.path.isfile('{}.{}'.format(database, ext)):
-            print('{}.{}'.format(database, ext))
+            print('{}.{} not found!'.format(database, ext))
             return False
     return True
 
@@ -295,7 +314,7 @@ def main():
     if args.download_resources:
         download_resources(args.resources_directory)
 
-    if args.database:   # if database was inputted
+    if args.database:  # if database was inputted
         inputted_db = True
         database_groups = args.database.split(',')
         for database in database_groups:
@@ -310,11 +329,13 @@ def main():
                               'NCBIfam': 'NF',
                               'Protein_Clusters': 'PRK',
                               'Smart': 'smart',
-                              'TIGRFAM': 'TIGR'}
+                              'TIGRFAM': 'TIGR',
+                              'COG': 'COG',
+                              'KOG': 'KOG'}
 
         for base in args.databases:
-            database_group = ['{}/{}_{}_{}'.format(args.resources_directory, databases_prefixes[base], args.threads,
-                                                str(i)) for i in range(int(args.threads))]
+            database_group = ['{}/{}_{}_{}'.format(args.resources_directory, databases_prefixes[base], args.threads, i)
+                              for i in range(int(args.threads))]
             remake_dbs = False
 
             i = 0
@@ -347,50 +368,71 @@ def main():
         for db_group in database_groups:
             # run annotation with rps-blast and database
             timed_message('Running annotation with RPS-BLAST and {} database as reference.'.format(db_group[0]))
+            '''
             run_rpsblast(args.file, '{}/{}_aligned.blast'.format(args.output, db_group[0]), ' '.join(db_group[1]),
                          threads=args.threads, max_target_seqs=args.max_target_seqs)
+            '''
     if inputted_db:
         exit()
+    '''
+    cddid = parse_cddid('{}/cddid_all.tbl'.format(args.resources_directory))
 
-    cddid = parse_cddid('{}/cddid.tbl'.format(args.resources_directory))
-    for db in args.databases:
+    timed_message("Converting CDD IDs to databases' IDs")
+    pbar = ProgressBar()
+    for db in pbar(args.databases):
         db_report = parse_blast('{}/{}_aligned.blast'.format(args.output, db))
         db_report = pd.merge(db_report, cddid, left_on='sseqid', right_on='CDD ID', how='left')
+        del db_report['CDD ID']
         db_report.to_csv('{}/{}_report.tsv'.format(args.output, db), sep='\t', index=False)
 
-    ncbi_table = pd.read_csv('hmm_PGAP.tsv', sep='\t', usecols=[1, 10, 12, 15])
+    ncbi_table = pd.read_csv('{}/hmm_PGAP.tsv'.format(args.resources_directory), sep='\t', usecols=[1, 10, 12, 15])
+    ncbi_table['source_identifier'] = [ide.split('.')[0] for ide in ncbi_table['source_identifier']]
+    ncbi_table['source_identifier'] = ncbi_table['source_identifier'].str.replace('PF', 'pfam')
+
     for db in ['CDD', 'Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
         if db in args.databases:
             report = pd.read_csv('{}/{}_report.tsv'.format(args.output, db), sep='\t')
-            # TODO - acertar os nomes/prefixos/ids - os do hmm_PGAP têm de ser relacionados com os dos reports
-
+            report = pd.merge(report, ncbi_table, left_on='DB ID', right_on='source_identifier', how='left')
+            report.to_csv('{}/{}_report.tsv'.format(args.output, db), sep='\t', index=False)
 
     if 'Smart' in args.databases:
-        smart_table = pd.read_csv('{}/descriptions.pl'.format(args.resources_directory), sep='\t', skiprows=2,
-                                  header=None)
-
-
-    if 'TIGRFAM' in args.databases:
-        pass
+        smart_table = pd.read_csv('{}/descriptions.pl'.format(args.resources_directory),
+                                  sep='\t', skiprows=2, header=None, usecols=[1, 2])
+        smart_table.columns = ['Smart ID', 'Smart description']
+        report = pd.read_csv('{}/Smart_report.tsv'.format(args.output), sep='\t')
+        report = pd.merge(report, smart_table, left_on='DB ID', right_on='Smart ID', how='left')
+        report.to_csv('{}/Smart_report.tsv'.format(args.output, db), sep='\t', index=False)
+    '''
+    fun = pd.read_csv('{}/fun.tsv'.format(args.resources_directory), sep='\t')
 
     if 'KOG' in args.databases:
-        pass
-    '''
+        kog_table = parse_kog('{}/kog'.format(args.resources_directory))
+        kog_table = pd.merge(kog_table, fun, left_on='KOG functional category (letter)',
+                             right_on='COG functional category (letter)', how='left')
+        report = pd.read_csv('{}/KOG_report.tsv'.format(args.output), sep='\t')
+        report = pd.merge(report, kog_table, left_on='DB ID', right_on='kog', how='left')
+        report.to_csv('{}/KOG_report.tsv'.format(args.output), sep='\t', index=False)
+
     if 'COG' in args.databases:
         # Add COG categories to BLAST info
-        final_result = cogblast2protein2cog(cogblast,
-                                            fun=args.resources_directory + '/fun.tsv',
-                                            whog=args.resources_directory + '/cog-20.def.tab')
+        cog_table = parse_whog('{}/cog-20.def.tab'.format(args.resources_directory))
+        cog_table = pd.merge(cog_table, fun, on='COG functional category (letter)', how='left')
+        report = pd.read_csv('{}/COG_report.tsv'.format(args.output), sep='\t')
+        print(report)
+        print(cog_table)
+        report = pd.merge(report, cog_table, left_on='DB ID', right_on='cog', how='left')
+        report.to_csv('{}/COG_report.tsv'.format(args.output), sep='\t', index=False)
 
         # cog2ec
         timed_message('Converting COG IDs to EC numbers.')
-        final_result = cog2ec(final_result, table=args.resources_directory + '/cog2ec.tsv',
+        report = cog2ec(report, table=args.resources_directory + '/cog2ec.tsv',
                               resources_dir=args.resources_directory)
 
         # cog2ko
         timed_message('Converting COG IDs to KEGG Orthologs.')
-        final_result = cog2ko(final_result, cog2ko=args.resources_directory + '/cog2ko.tsv')
+        report = cog2ko(report, cog2ko=args.resources_directory + '/cog2ko.tsv')
 
+    '''
     if not args.no_blast_info:
         final_result = final_result[['qseqid', 'CDD ID', 'COG general functional category',
                                      'COG functional category', 'COG protein description', 'cog', 'pident',
@@ -438,6 +480,7 @@ def main():
                 out_format='tsv')
     create_krona_plot(args.output + '/krona.tsv', args.output + '/cog_quantification.html')
     '''
+
 
 if __name__ == '__main__':
     main()
