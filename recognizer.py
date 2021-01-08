@@ -379,10 +379,9 @@ def main():
         for db_group in database_groups:
             # run annotation with rps-blast and database
             timed_message('Running annotation with RPS-BLAST and {} database as reference.'.format(db_group[0]))
-            '''
             run_rpsblast(args.file, '{}/{}_aligned.blast'.format(args.output, db_group[0]), ' '.join(db_group[1]),
                          threads=args.threads, max_target_seqs=args.max_target_seqs)
-            '''
+
     if inputted_db:
         exit()
 
@@ -452,7 +451,7 @@ def main():
                 ).reset_index().rename(columns={0: 'count'})
             cog_quantification.to_excel('{}/COG_quantification.xlsx'.format(args.output))
             cog_quantification[['count'] + cog_quantification.columns.tolist()[:-1]].to_csv(
-                '{}/COG_quantification.tsv'.format(args.output), sep='\t')
+                '{}/COG_quantification.tsv'.format(args.output), sep='\t', index=False, header=None)
             create_krona_plot('{}/krona.tsv'.format(args.output), '{}/cog_quantification.html'.format(args.output))
 
         cols += blast_cols
