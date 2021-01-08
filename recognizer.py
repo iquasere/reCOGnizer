@@ -213,14 +213,6 @@ def cdd2id(blast, cddid=sys.path[0] + '/resources_directory/cddid_all.tbl'):
     return pd.merge(blast, cddid, left_on='sseqid', right_on='CDD ID', how='left')
 
 
-def cogblast2protein2cog(cogblast, fun=sys.path[0] + '/resources_directory/fun.tsv',
-                         whog=sys.path[0] + '/resources_directory/cog-20.def.tab'):
-    fun = pd.read_csv(fun, sep='\t')
-    whog = parse_whog(whog)
-    whog = pd.merge(whog, fun, on='COG functional category (letter)', how='left')
-    return pd.merge(cogblast, whog, on='cog', how='left')
-
-
 def pn2database(pn):
     run_command('makeprofiledb -in {0} -title {1} -out {1}'.format(pn, pn.split('.pn')[0]))
 
@@ -390,7 +382,7 @@ def main():
     ncbi_table = pd.read_csv('{}/hmm_PGAP.tsv'.format(args.resources_directory), sep='\t', usecols=[1, 10, 12, 15])
     ncbi_table['source_identifier'] = [ide.split('.')[0] for ide in ncbi_table['source_identifier']]
     ncbi_table['source_identifier'] = ncbi_table['source_identifier'].str.replace('PF', 'pfam')
-    fun = pd.read_csv('{}/fun.tsv'.format(args.resources_directory), sep='\t')
+    fun = pd.read_csv('{}/fun.tsv'.format(sys.path[0]), sep='\t')
 
     timed_message("Organizing annotation results")
     blast_cols = ['pident', 'length', 'mismatch', 'gapopen', 'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore']
@@ -437,8 +429,7 @@ def main():
             report = pd.merge(report, cog_table, left_on='DB ID', right_on='cog', how='left')
             report.to_csv('{}/COG_report.tsv'.format(args.output), sep='\t', index=False)
             # cog2ec
-            report = cog2ec(report, table=args.resources_directory + '/cog2ec.tsv',
-                            resources_dir=args.resources_directory)
+            report = cog2ec(report, table='{}/cog2ec.tsv'.format(sys.path[0]), resources_dir=args.resources_directory)
             # cog2ko
             report = cog2ko(report, cog2ko=args.resources_directory + '/cog2ko.tsv')
 
