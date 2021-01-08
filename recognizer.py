@@ -15,6 +15,8 @@ import pathlib
 import shutil
 import subprocess
 import sys
+import time
+import datetime
 from multiprocessing import Pool
 from time import gmtime, strftime
 
@@ -300,11 +302,20 @@ def write_table(table, output, out_format='excel', header=True):
         table.to_csv(output + '.tsv', index=False, sep='\t', header=header)
 
 
+def multi_sheet_excel(writer, data, sheet_name='Sheet', lines=1000000, index=False):
+    i = 0
+    j = 1
+    while i + lines < len(data):
+        data.iloc[i:(i + lines)].to_excel(writer, sheet_name='{} ({})'.format(sheet_name, str(j)), index=index)
+        j += 1
+    data.iloc[i:len(data)].to_excel(writer, sheet_name='{} ({})'.format(sheet_name, str(j)), index=index)
+    return writer
+
+
 def create_krona_plot(tsv, output=None):
     if output is None:
         output = tsv.replace('.tsv', '.html')
-    conda_exec = subprocess.check_output('which conda'.split()).decode('utf8')
-    run_command('ktImportText {} -o {}'.format(conda_exec.split('/bin')[0], tsv, output))
+    run_command('ktImportText {} -o {}'.format(tsv, output))
 
 
 def main():
@@ -374,113 +385,90 @@ def main():
             '''
     if inputted_db:
         exit()
-    '''
+
+    # Load the relational tables
     cddid = parse_cddid('{}/cddid_all.tbl'.format(args.resources_directory))
-
-    timed_message("Converting CDD IDs to databases' IDs")
-    pbar = ProgressBar()
-    for db in pbar(args.databases):
-        db_report = parse_blast('{}/{}_aligned.blast'.format(args.output, db))
-        db_report = pd.merge(db_report, cddid, left_on='sseqid', right_on='CDD ID', how='left')
-        del db_report['CDD ID']
-        db_report.to_csv('{}/{}_report.tsv'.format(args.output, db), sep='\t', index=False)
-
     ncbi_table = pd.read_csv('{}/hmm_PGAP.tsv'.format(args.resources_directory), sep='\t', usecols=[1, 10, 12, 15])
     ncbi_table['source_identifier'] = [ide.split('.')[0] for ide in ncbi_table['source_identifier']]
     ncbi_table['source_identifier'] = ncbi_table['source_identifier'].str.replace('PF', 'pfam')
-
-    for db in ['CDD', 'Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
-        if db in args.databases:
-            report = pd.read_csv('{}/{}_report.tsv'.format(args.output, db), sep='\t')
-            report = pd.merge(report, ncbi_table, left_on='DB ID', right_on='source_identifier', how='left')
-            report.to_csv('{}/{}_report.tsv'.format(args.output, db), sep='\t', index=False)
-
-    if 'Smart' in args.databases:
-        smart_table = pd.read_csv('{}/descriptions.pl'.format(args.resources_directory),
-                                  sep='\t', skiprows=2, header=None, usecols=[1, 2])
-        smart_table.columns = ['Smart ID', 'Smart description']
-        report = pd.read_csv('{}/Smart_report.tsv'.format(args.output), sep='\t')
-        report = pd.merge(report, smart_table, left_on='DB ID', right_on='Smart ID', how='left')
-        report.to_csv('{}/Smart_report.tsv'.format(args.output, db), sep='\t', index=False)
-    '''
     fun = pd.read_csv('{}/fun.tsv'.format(args.resources_directory), sep='\t')
 
-    if 'KOG' in args.databases:
-        kog_table = parse_kog('{}/kog'.format(args.resources_directory))
-        kog_table = pd.merge(kog_table, fun, left_on='KOG functional category (letter)',
-                             right_on='COG functional category (letter)', how='left')
-        report = pd.read_csv('{}/KOG_report.tsv'.format(args.output), sep='\t')
-        report = pd.merge(report, kog_table, left_on='DB ID', right_on='kog', how='left')
-        report.to_csv('{}/KOG_report.tsv'.format(args.output), sep='\t', index=False)
+    timed_message("Organizing annotation results")
+    blast_cols = ['pident', 'length', 'mismatch', 'gapopen', 'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore']
 
-    if 'COG' in args.databases:
-        # Add COG categories to BLAST info
-        cog_table = parse_whog('{}/cog-20.def.tab'.format(args.resources_directory))
-        cog_table = pd.merge(cog_table, fun, on='COG functional category (letter)', how='left')
-        report = pd.read_csv('{}/COG_report.tsv'.format(args.output), sep='\t')
-        print(report)
-        print(cog_table)
-        report = pd.merge(report, cog_table, left_on='DB ID', right_on='cog', how='left')
-        report.to_csv('{}/COG_report.tsv'.format(args.output), sep='\t', index=False)
+    i = 1
+    j = len(args.databases)
+    for db in args.databases:
+        cols = ['qseqid', 'sseqid', 'DB ID', 'DB description']
+        print('[{}/{}] Handling {} identifications'.format(i, j, db))
+        report = parse_blast('{}/{}_aligned.blast'.format(args.output, db))
+        report = pd.merge(report, cddid, left_on='sseqid', right_on='CDD ID', how='left')
+        del report['CDD ID']
 
-        # cog2ec
-        timed_message('Converting COG IDs to EC numbers.')
-        report = cog2ec(report, table=args.resources_directory + '/cog2ec.tsv',
-                              resources_dir=args.resources_directory)
+        # adding protein sequences if requested
+        if not args.no_output_sequences:
+            fasta = parse_fasta(args.file)
+            fasta = pd.DataFrame.from_dict(fasta, orient='index')
+            fasta.columns = ['Sequence']
+            report = pd.merge(report, fasta, left_on='qseqid', right_index=True, how='left')
+            cols += ['Sequence']
 
-        # cog2ko
-        timed_message('Converting COG IDs to KEGG Orthologs.')
-        report = cog2ko(report, cog2ko=args.resources_directory + '/cog2ko.tsv')
+        if db in ['CDD', 'Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
+            report = pd.merge(report, ncbi_table, left_on='DB ID', right_on='source_identifier', how='left')
+            cols += ['product_name', 'ec_number', 'taxonomic_range_name']
 
-    '''
-    if not args.no_blast_info:
-        final_result = final_result[['qseqid', 'CDD ID', 'COG general functional category',
-                                     'COG functional category', 'COG protein description', 'cog', 'pident',
-                                     'length', 'mismatch', 'gapopen', 'qstart', 'qend', 'sstart', 'send',
-                                     'evalue', 'bitscore']]
-    else:
-        final_result = final_result[['qseqid', 'CDD ID', 'COG general functional category',
-                                     'COG functional category', 'COG protein description', 'cog']]
+        elif db == 'Smart':
+            smart_table = pd.read_csv('{}/descriptions.pl'.format(args.resources_directory),
+                                      sep='\t', skiprows=2, header=None, usecols=[1, 2])
+            smart_table.columns = ['Smart ID', 'Smart description']
+            smart_table['Smart ID'] = smart_table['Smart ID'].str.replace('SM', 'smart')
+            report = pd.merge(report, smart_table, left_on='DB ID', right_on='Smart ID', how='left')
+            cols += ['Smart description']
 
+        elif db == 'KOG':
+            kog_table = parse_kog('{}/kog'.format(args.resources_directory))
+            kog_table = pd.merge(kog_table, fun, left_on='KOG functional category (letter)',
+                                 right_on='COG functional category (letter)', how='left')
+            report = pd.merge(report, kog_table, left_on='DB ID', right_on='kog', how='left')
+            cols += ['COG general functional category', 'COG functional category', 'KOG protein description']
 
+        else:
+            cog_table = parse_whog('{}/cog-20.def.tab'.format(args.resources_directory))
+            cog_table = pd.merge(cog_table, fun, on='COG functional category (letter)', how='left')
+            report = pd.merge(report, cog_table, left_on='DB ID', right_on='cog', how='left')
+            report.to_csv('{}/COG_report.tsv'.format(args.output), sep='\t', index=False)
+            # cog2ec
+            report = cog2ec(report, table=args.resources_directory + '/cog2ec.tsv',
+                            resources_dir=args.resources_directory)
+            # cog2ko
+            report = cog2ko(report, cog2ko=args.resources_directory + '/cog2ko.tsv')
 
-    # adding protein sequences if requested
-    if not args.no_output_sequences:
-        fasta = parse_fasta(args.file)
-        fasta = pd.DataFrame.from_dict(fasta, orient='index')
-        fasta.columns = ['Sequence']
-        final_result = pd.merge(final_result, fasta, left_on='qseqid',
-                                right_index=True, how='left')
+            cols += ['COG general functional category', 'COG functional category', 'COG protein description',
+                     'EC number', 'KO']
 
-    # write protein to COG assignment
-    out_format = 'tsv' if args.tsv else 'excel'
-    write_table(final_result,
-                args.output + '/protein2cog',
-                out_format=out_format)
+            # COG quantification
+            cog_quantification = report.groupby(
+                ['COG general functional category', 'COG functional category', 'COG protein description', 'cog']).size(
+                ).reset_index().rename(columns={0: 'count'})
+            cog_quantification.to_excel('{}/COG_quantification.xlsx'.format(args.output))
+            cog_quantification[['count'] + cog_quantification.columns.tolist()[:-1]].to_csv(
+                '{}/COG_quantification.tsv'.format(args.output), sep='\t')
+            create_krona_plot('{}/krona.tsv'.format(args.output), '{}/cog_quantification.html'.format(args.output))
 
-    timed_message('Protein ID to COG and EC number is available at {}.'.format(
-        args.output + '/protein2cog'))
+        cols += blast_cols
 
-    # quantify COG categories
-    timed_message('Quantifying COG categories.')
-    cog_quantification = final_result.groupby(['COG general functional category',
-                                               'COG functional category', 'COG protein description', 'cog']).size(
-    ).reset_index().rename(columns={0: 'count'})
-    write_table(cog_quantification,
-                args.output + '/cog_quantification',
-                out_format=out_format)
-    timed_message('COG categories quantification is available at {}.'.format(
-        args.output + '/cog_quantification'))
+        report[cols].to_csv('{}/{}_report.tsv'.format(args.output, db), sep='\t', index=False)
+        i += 1
 
-    # represent that quantification in krona plot
-    timed_message('Creating Krona plot representation.')
-    write_table(cog_quantification[['count'] + cog_quantification.columns.tolist()[:-1]],
-                args.output + '/krona',
-                header=False,
-                out_format='tsv')
-    create_krona_plot(args.output + '/krona.tsv', args.output + '/cog_quantification.html')
-    '''
+    timed_message('Organizing all results at {}/reCOGnizer_results.xlsx'.format(args.output))
+    writer = pd.ExcelWriter('{}/reCOGnizer_results.xlsx'.format(args.output), engine='xlsxwriter')
+    pbar = ProgressBar()
+    for base in pbar(args.databases):
+        multi_sheet_excel(writer, pd.read_csv('{}/{}_report.tsv'.format(args.output, base), sep='\t'), sheet_name=base)
+    writer.save()
 
 
 if __name__ == '__main__':
+    start_time = time.time()
     main()
+    print('reCOGnizer analysis finished in {}'.format(strftime("%Hh%Mm%Ss", gmtime(time.time() - start_time))))
