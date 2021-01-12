@@ -140,10 +140,12 @@ def download_resources(directory):
         # KOG
         'https://ftp.ncbi.nlm.nih.gov/pub/COG/KOG/kog'
     ]:
-        run_command('wget {} -P {}'.format(location, directory))
+        pass
+        #run_command('wget {} -P {}'.format(location, directory))
 
     for file in ['cddid_all.tbl', 'eggnog4.protein_id_conversion.tsv', 'NOG.members.tsv']:
-        run_command('gunzip {}/{}.gz'.format(directory, file))
+        #run_command('gunzip {}/{}.gz'.format(directory, file))
+        pass
 
     # Extract the smps
     if sys.platform == "darwin":
@@ -154,7 +156,7 @@ def download_resources(directory):
         tool = 'tar'
     wd = os.getcwd()
     os.chdir(directory)
-    run_command('{} -xzf cdd.tar.gz --wildcards "*.smp"'.format(tool))
+    run_pipe_command('{} -xzf cdd.tar.gz --wildcards "*.smp"'.format(tool))
     os.chdir(wd)
 
 
@@ -237,7 +239,6 @@ def create_split_db(smp_directory, output, db_prefix, threads='12'):
     """
     print('Generating databases for [{}] threads.'.format(threads))
     smp_list = glob.glob('{}/{}*.smp'.format(smp_directory, db_prefix))
-    print(smp_list[:100])
     parts = list(split(smp_list, int(threads)))
     for i in range(len(parts)):
         with open('{}/{}_{}_{}.pn'.format(output, db_prefix, threads, i), 'w') as f:
