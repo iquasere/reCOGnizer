@@ -23,7 +23,7 @@ from time import gmtime, strftime
 import pandas as pd
 from progressbar import ProgressBar
 
-__version__ = '1.4.0'
+__version__ = '1.4.1'
 
 
 def get_arguments():
@@ -140,12 +140,10 @@ def download_resources(directory):
         # KOG
         'https://ftp.ncbi.nlm.nih.gov/pub/COG/KOG/kog'
     ]:
-        pass
-        #run_command('wget {} -P {}'.format(location, directory))
+        run_command('wget {} -P {}'.format(location, directory))
 
     for file in ['cddid_all.tbl', 'eggnog4.protein_id_conversion.tsv', 'NOG.members.tsv']:
-        #run_command('gunzip {}/{}.gz'.format(directory, file))
-        pass
+        run_command('gunzip {}/{}.gz'.format(directory, file))
 
     # Extract the smps
     if sys.platform == "darwin":
