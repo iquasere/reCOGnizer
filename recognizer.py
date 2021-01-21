@@ -442,7 +442,8 @@ def main():
             cog_quantification.to_excel('{}/COG_quantification.xlsx'.format(args.output))
             cog_quantification[['count'] + cog_quantification.columns.tolist()[:-1]].to_csv(
                 '{}/COG_quantification.tsv'.format(args.output), sep='\t', index=False, header=None)
-            create_krona_plot('{}/krona.tsv'.format(args.output), '{}/cog_quantification.html'.format(args.output))
+            create_krona_plot('{}/COG_quantification.tsv'.format(args.output),
+                              '{}/COG_quantification.html'.format(args.output))
 
         cols += blast_cols
 
