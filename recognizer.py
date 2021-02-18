@@ -23,7 +23,7 @@ from time import gmtime, strftime
 import pandas as pd
 from progressbar import ProgressBar
 
-__version__ = '1.4.1'
+__version__ = '1.4.2'
 
 
 def get_arguments():
@@ -309,6 +309,18 @@ def create_krona_plot(tsv, output=None):
     run_command('ktImportText {} -o {}'.format(tsv, output))
 
 
+def write_cog_categories(data, output_basename, db='COG'):
+    # COG categories quantification
+    data = data.groupby(
+        ['COG general functional category', 'COG functional category', '{} protein description'.format(db), 'DB ID']
+    ).size().reset_index().rename(columns={0: 'count'})
+    data.to_excel('{}_quantification.xlsx'.format(output_basename))
+    data[['count'] + data.columns.tolist()[:-1]].to_csv(
+        '{}_quantification.tsv'.format(output_basename), sep='\t', index=False, header=None)
+    create_krona_plot('{}_quantification.tsv'.format(output_basename),
+                      '{}_quantification.html'.format(output_basename))
+
+
 def main():
     # get arguments
     args = get_arguments()
@@ -364,14 +376,14 @@ def main():
     if inputted_db:
         # run annotation with rps-blast and database
         timed_message('Running annotation with RPS-BLAST and inputted database as reference.')
-        run_rpsblast(args.file, '{}/aligned.blast'.format(args.output, ), ' '.join(database_groups),
+        run_rpsblast(args.file, '{}/aligned.blast'.format(args.output), ' '.join(database_groups),
                      threads=args.threads, max_target_seqs=args.max_target_seqs)
     else:
         for db_group in database_groups:
             # run annotation with rps-blast and database
             timed_message('Running annotation with RPS-BLAST and {} database as reference.'.format(db_group[0]))
-            run_rpsblast(args.file, '{}/{}_aligned.blast'.format(args.output, db_group[0]), ' '.join(db_group[1]),
-                         threads=args.threads, max_target_seqs=args.max_target_seqs)
+            #run_rpsblast(args.file, '{}/{}_aligned.blast'.format(args.output, db_group[0]), ' '.join(db_group[1]),
+            #             threads=args.threads, max_target_seqs=args.max_target_seqs)
 
     if inputted_db:
         exit()
@@ -422,28 +434,23 @@ def main():
             report = pd.merge(report, kog_table, left_on='DB ID', right_on='kog', how='left')
             cols += ['COG general functional category', 'COG functional category', 'KOG protein description']
 
+            write_cog_categories(report, '{}/KOG'.format(args.output), db='KOG')
+
         else:
             cog_table = parse_whog('{}/cog-20.def.tab'.format(args.resources_directory))
             cog_table = pd.merge(cog_table, fun, on='COG functional category (letter)', how='left')
             report = pd.merge(report, cog_table, left_on='DB ID', right_on='cog', how='left')
             report.to_csv('{}/COG_report.tsv'.format(args.output), sep='\t', index=False)
             # cog2ec
-            report = cog2ec(report, table='{}/cog2ec.tsv'.format(sys.path[0]), resources_dir=args.resources_directory)
+            report = cog2ec(report, table='{}/cog2ec.tsv'.format(args.resources_directory),
+                            resources_dir=args.resources_directory)
             # cog2ko
             report = cog2ko(report, cog2ko=args.resources_directory + '/cog2ko.tsv')
 
+            write_cog_categories(report, '{}/COG'.format(args.output), db='COG')
+
             cols += ['COG general functional category', 'COG functional category', 'COG protein description',
                      'EC number', 'KO']
-
-            # COG quantification
-            cog_quantification = report.groupby(
-                ['COG general functional category', 'COG functional category', 'COG protein description', 'cog']).size(
-                ).reset_index().rename(columns={0: 'count'})
-            cog_quantification.to_excel('{}/COG_quantification.xlsx'.format(args.output))
-            cog_quantification[['count'] + cog_quantification.columns.tolist()[:-1]].to_csv(
-                '{}/COG_quantification.tsv'.format(args.output), sep='\t', index=False, header=None)
-            create_krona_plot('{}/COG_quantification.tsv'.format(args.output),
-                              '{}/COG_quantification.html'.format(args.output))
 
         cols += blast_cols
 

@@ -1,12 +1,14 @@
 # reCOGnizer
 
-A tool for domain based annotation with the COG database.
+A tool for domain based annotation with databases from the [Conserved Domains Database](https://www.ncbi.nlm.nih.gov/Structure/cdd/cdd.shtml).
 
 ## Features
 
-reCOGnizer is a user-friendly implementation of protein functional identification using COG database. 
-* It builds a split version of the COG database with which RPS-BLAST can run in multithread, significantly increasing the speed of the most time intensive step of protein annotation. 
-* After COG assignment to proteins, reCOGnizer converts CDD IDs to their respective COGs, before organizing those COGs into a relational table of protein to COG, with the inclusion of the three levels of functional classification from COG. 
+reCOGnizer is a user-friendly implementation of protein functional identification with RPS-BLAST and databases from CDD as reference. 
+* It builds split versions of the databases with which RPS-BLAST can run in multithread, significantly increasing the speed of the most time intensive step of protein annotation. 
+* After domain assignment to proteins, reCOGnizer converts CDD IDs to the IDs of the respective DBs, and further obtaining domain descriptions available at CDD 
+* Further information is retrieved depending on the database in question:
+  * before organizing those COGs into a relational table of protein to COG, with the inclusion of the three levels of functional classification from COG. 
 * reCOGnizer further converts assigned COG functions to EC numbers, providing more functional information.
 
 ## Installation
