@@ -382,8 +382,8 @@ def main():
         for db_group in database_groups:
             # run annotation with rps-blast and database
             timed_message('Running annotation with RPS-BLAST and {} database as reference.'.format(db_group[0]))
-            #run_rpsblast(args.file, '{}/{}_aligned.blast'.format(args.output, db_group[0]), ' '.join(db_group[1]),
-            #             threads=args.threads, max_target_seqs=args.max_target_seqs)
+            run_rpsblast(args.file, '{}/{}_aligned.blast'.format(args.output, db_group[0]), ' '.join(db_group[1]),
+                         threads=args.threads, max_target_seqs=args.max_target_seqs)
 
     if inputted_db:
         exit()
