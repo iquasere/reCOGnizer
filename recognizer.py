@@ -16,14 +16,13 @@ import shutil
 import subprocess
 import sys
 import time
-import datetime
+import numpy as np
+import pandas as pd
 from multiprocessing import Pool
 from time import gmtime, strftime
-
-import pandas as pd
 from progressbar import ProgressBar
 
-__version__ = '1.4.2'
+__version__ = '1.4.3'
 
 
 def get_arguments():
@@ -166,11 +165,6 @@ def run_rpsblast(query, output, reference, threads='0', max_target_seqs='1'):
     subprocess.run(bashCommand)
 
 
-'''
-Handling COG
-'''
-
-
 def parse_cddid(cddid):
     cddid = pd.read_csv(cddid, sep='\t', header=None)[[0, 1, 3]]
     cddid.columns = ['CDD ID', 'DB ID', 'DB description']
@@ -178,9 +172,20 @@ def parse_cddid(cddid):
     return cddid
 
 
+def expand_by_list_column(df, column='COG functional category (letter)'):
+    lens = [len(item) for item in df[column]]
+    dictionary = dict()
+    for col in df.columns:
+        dictionary[col] = np.repeat(df[col].values, lens)
+    dictionary[column] = np.concatenate(df[column].values)
+    return pd.DataFrame(dictionary)
+
+
 def parse_whog(whog):
     df = pd.read_csv(whog, sep='\t', usecols=[0, 1, 2], header=None, encoding='ISO 8859-1')
     df.columns = ['cog', 'COG functional category (letter)', 'COG protein description']
+    df['COG functional category (letter)'] = df['COG functional category (letter)'].apply(lambda x: [i for i in x])
+    df = expand_by_list_column(df, column='COG functional category (letter)')
     return df
 
 
@@ -191,6 +196,8 @@ def parse_kog(kog):
         lines.append([line[0][1], line[1], ' '.join(line[2:])])
     df = pd.DataFrame(lines)
     df.columns = ['KOG functional category (letter)', 'kog', 'KOG protein description']
+    df['KOG functional category (letter)'] = df['KOG functional category (letter)'].apply(lambda x: [i for i in x])
+    df = expand_by_list_column(df, column='KOG functional category (letter)')
     return df
 
 
@@ -294,12 +301,12 @@ def write_table(table, output, out_format='excel', header=True):
 
 
 def multi_sheet_excel(writer, data, sheet_name='Sheet', lines=1000000, index=False):
-    i = 0
-    j = 1
-    while i + lines < len(data):
-        data.iloc[i:(i + lines)].to_excel(writer, sheet_name='{} ({})'.format(sheet_name, str(j)), index=index)
-        j += 1
-    data.iloc[i:len(data)].to_excel(writer, sheet_name='{} ({})'.format(sheet_name, str(j)), index=index)
+    if len(data) < lines:
+        data.to_excel(writer, sheet_name='{}'.format(sheet_name), index=index)
+    else:
+        for i in range(0, len(data), lines):
+            j = min(i + lines, len(data))
+            data.iloc[i:(i + lines)].to_excel(writer, sheet_name='{} ({})'.format(sheet_name, j), index=index)
     return writer
 
 

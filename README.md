@@ -19,9 +19,23 @@ git clone https://github.com/iquasere/reCOGnizer.git
 sudo reCOGnizer/install.bash
 ```
 
+### With Bioconda
+
+reCOGnizer can also be installed with Conda! Many thanks to [Devon Ryan](https://github.com/dpryan79) for his precious help!
+
+Install:  ```conda install -c conda-forge -c bioconda recognizer```
+
+Test installation: ```recognizer.py -v```
+
+**Warning:** running with Conda is better performed using the -rd parameter to store the databases and other resources in a directory of your choice. Doing so will prevent reCOGnizer from putting these files in unexpected locations.
+
 ## Usage
 
-reCOGnizer needs an input file, but that is all it needs!
+The simplest way to run reCOGnizer is to just specify the fasta filename and an output directory - though even the output directory is not mandatory. It is recommended that a "resources" directory is specified to store the databases that reCOGnizer requires.
+```
+recognizer.py -f input_file.fasta -o recognizer_output -rd resources_directory
+```
+However, it offers several options for customizing its workflow:
 ```
 usage: recognizer.py [-h] [-t THREADS] [-o OUTPUT] [-rd RESOURCES_DIRECTORY]
                      [-db DATABASE] [--custom-database]
@@ -62,11 +76,6 @@ required named arguments:
   -f FILE, --file FILE  Fasta file with protein sequences for annotation
 ```
 
-The simplest way to run reCOGnizer is to just specify the fasta filename and an output directory - though even the output directory is not mandatory.
-```
-python recognizer.py -f input_file.fasta -o output_folder
-```
-
 ## Outputs
 
 reCOGnizer takes a FASTA file as input and produces two main outputs into the output directory:
@@ -76,19 +85,6 @@ reCOGnizer takes a FASTA file as input and produces two main outputs into the ou
 ![ScreenShot](krona_plot.png)
 Krona plot with the quantification of COGs identified in the simulated dataset used to test [MOSCA](github.com/iquasere/MOSCA) and reCOGnizer.
 
-## Docker
+## Referencing reCOGnizer
 
-reCOGnizer already has its own image! To use it, just pull the image and run it!
-```
-docker pull iquasere/recognizer:1.2.5
-docker run -it -v absolute/path/to/fasta_folder:/input_folder /absolute/path/to/output_folder:/output_folder --rm iquasere/recognizer -f /input_folder/input_file.fasta -o /output_folder [other arguments]
-```
-
-## Bioconda
-
-reCOGnizer can also be installed with Conda! Many thanks to [Devon Ryan](https://github.com/dpryan79) for his precious help!
-```
-conda install -c bioconda recognizer
-recognizer.py -v
-```
-**Warning:** running with Conda is better performed using the -rd parameter to store the databases and other resources in a directory of your choice. Doing so will prevent reCOGnizer from putting these files in unexpected locations.
+reCOGnizer is still not published. If you use it, please reference the bioconda package: https://anaconda.org/bioconda/recognizer
