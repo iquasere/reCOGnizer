@@ -22,7 +22,7 @@ from multiprocessing import Pool
 from time import gmtime, strftime
 from progressbar import ProgressBar
 
-__version__ = '1.4.4'
+__version__ = '1.4.5'
 
 
 def get_arguments():
