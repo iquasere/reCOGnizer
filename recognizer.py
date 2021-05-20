@@ -22,7 +22,7 @@ from multiprocessing import Pool
 from time import gmtime, strftime
 from progressbar import ProgressBar
 
-__version__ = '1.4.5'
+__version__ = '1.4.6'
 
 
 def get_arguments():
@@ -33,8 +33,8 @@ def get_arguments():
                         default=str(multiprocessing.cpu_count() - 2),
                         help="""Number of threads for reCOGnizer to use. 
                         Default is number of CPUs available minus 2.""")
-    parser.add_argument("-o", "--output", type=str, help="Output directory",
-                        default='reCOGnizer_results'),
+    parser.add_argument("--evalue", type=float, default=10e-2, help="Maximum e-value to report annotations for.")
+    parser.add_argument("-o", "--output", type=str, help="Output directory", default='reCOGnizer_results')
     parser.add_argument("-dr", "--download-resources", default=False, action="store_true",
                         help='If resources for reCOGnizer are not available at "resources_directory"')
     parser.add_argument("-rd", "--resources-directory", type=str,
@@ -50,8 +50,7 @@ def get_arguments():
     parser.add_argument("--custom-database", action="store_true", default=False,
                         help="If database was NOT produced by reCOGnizer")
     parser.add_argument("-seqs", "--max-target-seqs", type=str,
-                        help="""Number of maximum identifications for each protein.
-                        Default is 1.""", default="1")
+                        help="Number of maximum identifications for each protein. Default is 1.", default="1")
     parser.add_argument("--tsv", action="store_true", default=False,
                         help="Tables will be produced in TSV format (and not EXCEL).")
     parser.add_argument("--remove-spaces", action="store_true", default=False,
@@ -157,10 +156,10 @@ def download_resources(directory):
     os.chdir(wd)
 
 
-def run_rpsblast(query, output, reference, threads='0', max_target_seqs='1'):
+def run_rpsblast(query, output, reference, threads='0', max_target_seqs='1', evalue=10e-2):
     # This run_command is different because of reference, which can't be split by space
     bashCommand = ['rpsblast', '-query', query, '-db', reference, '-out', output, '-outfmt', '6',
-                   '-num_threads', threads, '-max_target_seqs', max_target_seqs]
+                   '-num_threads', threads, '-max_target_seqs', max_target_seqs, '-evalue', str(evalue)]
     print(' '.join(bashCommand))
     subprocess.run(bashCommand)
 
@@ -384,13 +383,13 @@ def main():
         # run annotation with rps-blast and database
         timed_message('Running annotation with RPS-BLAST and inputted database as reference.')
         run_rpsblast(args.file, '{}/aligned.blast'.format(args.output), ' '.join(database_groups),
-                     threads=args.threads, max_target_seqs=args.max_target_seqs)
+                     threads=args.threads, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
     else:
         for db_group in database_groups:
             # run annotation with rps-blast and database
             timed_message('Running annotation with RPS-BLAST and {} database as reference.'.format(db_group[0]))
             run_rpsblast(args.file, '{}/{}_aligned.blast'.format(args.output, db_group[0]), ' '.join(db_group[1]),
-                         threads=args.threads, max_target_seqs=args.max_target_seqs)
+                         threads=args.threads, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
 
     if inputted_db:
         exit()
@@ -468,7 +467,7 @@ def main():
     writer = pd.ExcelWriter('{}/reCOGnizer_results.xlsx'.format(args.output), engine='xlsxwriter')
     pbar = ProgressBar()
     for base in pbar(args.databases):
-        multi_sheet_excel(writer, pd.read_csv('{}/{}_report.tsv'.format(args.output, base), sep='\t'), sheet_name=base)
+        multi_sheet_excel(writer, pd.read_csv(f'{args.output}/{base}_report.tsv', sep='\t'), sheet_name=base)
     writer.save()
 
 
