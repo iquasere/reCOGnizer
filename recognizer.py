@@ -22,7 +22,7 @@ from multiprocessing import Pool
 from time import gmtime, strftime
 from progressbar import ProgressBar
 
-__version__ = '1.4.6'
+__version__ = '1.4.7'
 
 
 def get_arguments():
@@ -33,7 +33,8 @@ def get_arguments():
                         default=str(multiprocessing.cpu_count() - 2),
                         help="""Number of threads for reCOGnizer to use. 
                         Default is number of CPUs available minus 2.""")
-    parser.add_argument("--evalue", type=float, default=10e-2, help="Maximum e-value to report annotations for.")
+    parser.add_argument("--evalue", type=float, default=1e-2, help="Maximum e-value to report annotations for.")
+    parser.add_argument("--pident", type=float, default=0, help="Minimum pident to report annotations for.")
     parser.add_argument("-o", "--output", type=str, help="Output directory", default='reCOGnizer_results')
     parser.add_argument("-dr", "--download-resources", default=False, action="store_true",
                         help='If resources for reCOGnizer are not available at "resources_directory"')
@@ -463,11 +464,15 @@ def main():
         report[cols].to_csv('{}/{}_report.tsv'.format(args.output, db), sep='\t', index=False)
         i += 1
 
+    timed_message(f'Filtering matches for: pident < {args.pident}')
     timed_message('Organizing all results at {}/reCOGnizer_results.xlsx'.format(args.output))
     writer = pd.ExcelWriter('{}/reCOGnizer_results.xlsx'.format(args.output), engine='xlsxwriter')
+
     pbar = ProgressBar()
     for base in pbar(args.databases):
-        multi_sheet_excel(writer, pd.read_csv(f'{args.output}/{base}_report.tsv', sep='\t'), sheet_name=base)
+        report = pd.read_csv(f'{args.output}/{base}_report.tsv', sep='\t')
+        report = report[report['pident'] > args.pident]
+        multi_sheet_excel(writer, report, sheet_name=base)
     writer.save()
 
 
