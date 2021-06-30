@@ -22,7 +22,7 @@ from multiprocessing import Pool
 from time import gmtime, strftime
 from progressbar import ProgressBar
 
-__version__ = '1.4.8'
+__version__ = '1.4.9'
 
 
 def get_arguments():
@@ -382,8 +382,8 @@ def main():
         for db_group in database_groups:
             # run annotation with rps-blast and database
             timed_message(f'Running annotation with RPS-BLAST and {db_group[0]} database as reference.')
-            #run_rpsblast(args.file, f'{args.output}/{db_group[0]}_aligned.blast', ' '.join(db_group[1]),
-            #             threads=args.threads, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
+            run_rpsblast(args.file, f'{args.output}/{db_group[0]}_aligned.blast', ' '.join(db_group[1]),
+                         threads=args.threads, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
 
     if inputted_db:
         exit()
