@@ -9,28 +9,25 @@ Nov 2019
 
 import argparse
 import glob
-import multiprocessing
 import os
 import pathlib
 import shutil
 import subprocess
 import sys
-import time
 import numpy as np
 import pandas as pd
-from multiprocessing import Pool
-from time import gmtime, strftime
-from progressbar import ProgressBar
+from tqdm import tqdm
+from multiprocessing import Pool, cpu_count
+from time import time, gmtime, strftime
 
-__version__ = '1.4.8'
+__version__ = '1.4.10'
 
 
 def get_arguments():
     parser = argparse.ArgumentParser(
         description="reCOGnizer - a tool for domain based annotation with the COG database",
         epilog="Input file must be specified.")
-    parser.add_argument("-t", "--threads", type=str,
-                        default=str(multiprocessing.cpu_count() - 2),
+    parser.add_argument("-t", "--threads", type=str, default=str(cpu_count() - 2),
                         help="Number of threads for reCOGnizer to use [max available - 2]")
     parser.add_argument("--evalue", type=float, default=1e-2, help="Maximum e-value to report annotations for [1e-2]")
     parser.add_argument("--pident", type=float, default=0, help="Minimum pident to report annotations for [0]")
@@ -44,7 +41,7 @@ def get_arguments():
     parser.add_argument("-dbs", "--databases", type=str, nargs='+',
                         choices=["CDD", "Pfam", "NCBIfam", "Protein_Clusters", "Smart", "TIGRFAM", "COG", "KOG"],
                         default=["CDD", "Pfam", "NCBIfam", "Protein_Clusters", "Smart", "TIGRFAM", "COG", "KOG"],
-                        help="Databases to include in functional annotation")
+                        help="Databases to include in functional annotation [all available]")
     parser.add_argument("-db", "--database", type=str, help="""Basename of database for annotation. 
                         If multiple databases, use comma separated list (db1,db2,db3)""")
     parser.add_argument("--custom-database", action="store_true", default=False,
@@ -78,7 +75,7 @@ def get_arguments():
 
 
 def timed_message(message):
-    print(f'{strftime("%Y-%m-%d %H:%M:%S", gmtime())}:{message}')
+    print(f'{strftime("%Y-%m-%d %H:%M:%S", gmtime())}: {message}')
 
 
 def run_command(bashCommand, print_command=True, stdout=None):
@@ -100,19 +97,18 @@ def run_pipe_command(bashCommand, file='', mode='w', print_message=True):
             subprocess.Popen(bashCommand, stdin=subprocess.PIPE, shell=True, stdout=output_file).communicate()
 
 
-def parse_fasta(file):
-    lines = [line.rstrip('\n') for line in open(file)]
-    i = 0
-    sequences = dict()
-    while i < len(lines):
-        if lines[i].startswith('>'):
-            name = lines[i][1:]
-            sequences[name] = ''
-            i += 1
-            while i < len(lines) and not lines[i].startswith('>'):
-                sequences[name] += lines[i]
-                i += 1
-    return sequences
+def parse_fasta(filename):
+    name = None
+    with open(filename) as file:
+        for line in file:
+            if line.startswith('>'):
+                if name:
+                    yield name, sequence
+                name = line[1:-1]
+                sequence = ''
+            else:
+                sequence += line[:-1]
+        yield name, sequence
 
 
 def download_resources(directory):
@@ -197,22 +193,13 @@ def parse_kog(kog):
 
 
 def parse_blast(file):
-    blast = pd.read_csv(file, sep='\t', header=None)
-    blast.columns = ['qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen',
-                     'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore']
-    return blast
-
-
-def cdd2id(blast, cddid=f'{sys.path[0]}/resources_directory/cddid_all.tbl'):
-    """
-    Input:
-        blast: str - filename of blast outputted by RPS-BLAST with CDD identifications
-    Output:
-        pandas.DataFrame with CDD IDs converted to COGs and respective categories
-    """
-    blast = parse_blast(blast)
-    cddid = parse_cddid(cddid)
-    return pd.merge(blast, cddid, left_on='sseqid', right_on='CDD ID', how='left')
+    if os.stat(file).st_size != 0:
+        blast = pd.read_csv(file, sep='\t', header=None)
+        blast.columns = ['qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen',
+                         'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore']
+        return blast
+    return pd.DataFrame(columns=['qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen',
+                         'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore'])
 
 
 def pn2database(pn):
@@ -310,12 +297,11 @@ def create_krona_plot(tsv, output=None):
     run_command(f'ktImportText {tsv} -o {output}')
 
 
-def write_cog_categories(data, output_basename, db='COG'):
+def write_cog_categories(data, output_basename):
     # COG categories quantification
     data = data.groupby(
         ['COG general functional category', 'COG functional category', 'Protein description', 'DB ID']
     ).size().reset_index().rename(columns={0: 'count'})
-    data.to_excel(f'{output_basename}_quantification.xlsx')
     data[['count'] + data.columns.tolist()[:-1]].to_csv(
         f'{output_basename}_quantification.tsv', sep='\t', index=False, header=None)
     create_krona_plot(f'{output_basename}_quantification.tsv', f'{output_basename}_quantification.html')
@@ -382,8 +368,8 @@ def main():
         for db_group in database_groups:
             # run annotation with rps-blast and database
             timed_message(f'Running annotation with RPS-BLAST and {db_group[0]} database as reference.')
-            #run_rpsblast(args.file, f'{args.output}/{db_group[0]}_aligned.blast', ' '.join(db_group[1]),
-            #             threads=args.threads, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
+            run_rpsblast(args.file, f'{args.output}/{db_group[0]}_aligned.blast', ' '.join(db_group[1]),
+                         threads=args.threads, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
 
     if inputted_db:
         exit()
@@ -408,9 +394,11 @@ def main():
         # adding protein sequences if requested
         if not args.no_output_sequences:
             fasta = parse_fasta(args.file)
-            fasta = pd.DataFrame.from_dict(fasta, orient='index')
-            fasta.columns = ['Sequence']
-            report = pd.merge(report, fasta, left_on='qseqid', right_index=True, how='left')
+            report['Sequence'] = pd.Series(dtype=str)
+            report.set_index('qseqid', inplace=True)
+            for (name, sequence) in fasta:
+                report.at[name, 'Sequence'] = sequence
+            report.reset_index(inplace=True)
 
         if db in ['CDD', 'Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
             report = pd.merge(report, ncbi_table, left_on='DB ID', right_on='source_identifier', how='left')
@@ -431,7 +419,7 @@ def main():
             report = pd.merge(report, kog_table, left_on='DB ID', right_on='kog', how='left')
             report.columns = report.columns.tolist()[:-4] + ['Protein description'] + report.columns.tolist()[-3:]
 
-            write_cog_categories(report, f'{args.output}/KOG', db='KOG')
+            write_cog_categories(report, f'{args.output}/KOG')
 
         else:
             cog_table = parse_whog(f'{args.resources_directory}/cog-20.def.tab')
@@ -445,17 +433,15 @@ def main():
             report.columns = report.columns.tolist()[:-5] + ['Protein description'] + report.columns.tolist()[-4:]
             report.to_csv(f'{args.output}/COG_report.tsv', sep='\t', index=False)
 
-            write_cog_categories(report, f'{args.output}/COG', db='COG')
+            write_cog_categories(report, f'{args.output}/COG')
 
         report.to_csv(f'{args.output}/{db}_report.tsv', sep='\t', index=False)
         i += 1
 
     timed_message(f'Filtering matches for: pident < {args.pident}')
-    timed_message(f'Organizing all results at {args.output}/reCOGnizer_results.xlsx')
     writer = pd.ExcelWriter(f'{args.output}/reCOGnizer_results.xlsx', engine='xlsxwriter')
 
-    pbar = ProgressBar()
-    for base in pbar(args.databases):
+    for base in tqdm(args.databases, desc=f'Organizing all results at {args.output}/reCOGnizer_results.xlsx'):
         report = pd.read_csv(f'{args.output}/{base}_report.tsv', sep='\t')
         report = report[report['pident'] > args.pident]
         multi_sheet_excel(writer, report, sheet_name=base)
@@ -471,6 +457,6 @@ def main():
 
 
 if __name__ == '__main__':
-    start_time = time.time()
+    start_time = time()
     main()
-    print(f'reCOGnizer analysis finished in {strftime("%Hh%Mm%Ss", gmtime(time.time() - start_time))}')
+    print(f'reCOGnizer analysis finished in {strftime("%Hh%Mm%Ss", gmtime(time() - start_time))}')
