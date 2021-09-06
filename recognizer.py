@@ -460,3 +460,4 @@ if __name__ == '__main__':
     start_time = time()
     main()
     print(f'reCOGnizer analysis finished in {strftime("%Hh%Mm%Ss", gmtime(time() - start_time))}')
+
