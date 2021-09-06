@@ -2,18 +2,28 @@
 
 A tool for domain based annotation with databases from the [Conserved Domains Database](https://www.ncbi.nlm.nih.gov/Structure/cdd/cdd.shtml).
 
+* [Features](https://github.com/iquasere/reCOGnizer#features)
+* [Installing reCOGnizer](https://github.com/iquasere/reCOGnizer#installing-recognizer)
+* [Annotation with reCOGnizer](https://github.com/iquasere/reCOGnizer#annotation-with-recognizer)
+* [Output](https://github.com/iquasere/reCOGnizer#output)
+* [Other parameters](https://github.com/iquasere/reCOGnizer#other-parameters)
+* [Referencing reCOGnizer](https://github.com/iquasere/reCOGnizer#referencing-recognizer)
+
+
 ## Features
 
-reCOGnizer is a user-friendly implementation of protein functional identification with RPS-BLAST and databases from CDD as reference. 
-* It builds split versions of the databases with which RPS-BLAST can run in multithread, significantly increasing the speed of the most time intensive step of protein annotation. 
-* After domain assignment to proteins, reCOGnizer converts CDD IDs to the IDs of the respective DBs, and further obtaining domain descriptions available at CDD 
+reCOGnizer performs domain-based annotation with RPS-BLAST and databases from CDD as reference.
+* Reference databases currently implemented: CDD, NCBIfam, Pfam, TIGRFAM, Protein Clusters, SMART, COG and KOG.
+* reCOGnizer builds split versions of these databases with which RPS-BLAST can run in multithread, significantly increasing the speed of annotation.
+* After domain assignment to proteins, reCOGnizer converts CDD IDs to the IDs of the respective DBs, and obtains domain descriptions available at CDD.
 * Further information is retrieved depending on the database in question:
-  * before organizing those COGs into a relational table of protein to COG, with the inclusion of the three levels of functional classification from COG. 
-* reCOGnizer further converts assigned COG functions to EC numbers, providing more functional information.
+    * NCBIfam, Pfam, TIGRFAM and Protein Clusters annotations are complemented with taxonomic classifications and EC numbers
+    * SMART annotations are complemented with SMART descriptions
+    * COG and KOG annotations are complemented with COG categories and EC numbers and KEGG Orthologs (for COG)
 
-## Installation
+## Installing reCOGnizer
 
-To install reCOGnizer, simply clone this repository and run install.bash!
+To install reCOGnizer, clone this repository and run the install script:
 ```
 git clone https://github.com/iquasere/reCOGnizer.git
 sudo reCOGnizer/install.bash
@@ -29,13 +39,24 @@ Test installation: ```recognizer.py -v```
 
 **Warning:** running with Conda is better performed using the -rd parameter to store the databases and other resources in a directory of your choice. Doing so will prevent reCOGnizer from putting these files in unexpected locations.
 
-## Usage
+## Annotation with reCOGnizer
 
 The simplest way to run reCOGnizer is to just specify the fasta filename and an output directory - though even the output directory is not mandatory. It is recommended that a "resources" directory is specified to store the databases that reCOGnizer requires.
 ```
 recognizer.py -f input_file.fasta -o recognizer_output -rd resources_directory
 ```
-However, it offers several options for customizing its workflow:
+
+## Output
+
+reCOGnizer takes a FASTA file as input and produces two main outputs into the output directory:
+* ```reCOGnizer_results.tsv```, a table with the annotations for each protein
+* ```cog_quantification``` and respective Krona representation (Fig. 1), which describes the functional landscape of the proteins in the input file
+
+![ScreenShot](krona_plot.png)
+Fig. 1. Krona plot with the quantification of COGs identified in the simulated dataset used to test [MOSCA](github.com/iquasere/MOSCA) and reCOGnizer.
+
+## Other parameters
+
 ```
 usage: recognizer.py [-h] [-t THREADS] [-o OUTPUT] [-rd RESOURCES_DIRECTORY]
                      [-db DATABASE] [--custom-database]
@@ -75,15 +96,6 @@ optional arguments:
 required named arguments:
   -f FILE, --file FILE  Fasta file with protein sequences for annotation
 ```
-
-## Outputs
-
-reCOGnizer takes a FASTA file as input and produces two main outputs into the output directory:
-* protein2cog, a table relating assigned cogs to queried proteins
-* cog_quantification and respective Krona representation, which describes the functional landscape of the proteins in the input file
-
-![ScreenShot](krona_plot.png)
-Krona plot with the quantification of COGs identified in the simulated dataset used to test [MOSCA](github.com/iquasere/MOSCA) and reCOGnizer.
 
 ## Referencing reCOGnizer
 
