@@ -23,7 +23,7 @@ requirements:
     - openpyxl
     - krona
     - wget
-    - progressbar
+    - tqdm
     - xlsxwriter
 
 test:
