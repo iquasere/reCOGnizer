@@ -7,59 +7,79 @@ By João Sequeira
 Nov 2019
 """
 
-import argparse
-import glob
+from argparse import ArgumentParser
+from glob import glob
 import os
-import pathlib
-import shutil
-import subprocess
+from pathlib import Path
+from shutil import which
+from subprocess import run, Popen, PIPE, check_output
 import sys
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from multiprocessing import Pool, cpu_count
 from time import time, gmtime, strftime
+from Bio import Entrez, SeqIO
 
-__version__ = '1.4.10'
+__version__ = '1.5.0'
 
+Entrez.email = "A.N.Other@example.com"
 
 def get_arguments():
-    parser = argparse.ArgumentParser(
+    parser = ArgumentParser(
         description="reCOGnizer - a tool for domain based annotation with the COG database",
         epilog="Input file must be specified.")
     parser.add_argument("-t", "--threads", type=str, default=str(cpu_count() - 2),
                         help="Number of threads for reCOGnizer to use [max available - 2]")
     parser.add_argument("--evalue", type=float, default=1e-2, help="Maximum e-value to report annotations for [1e-2]")
     parser.add_argument("--pident", type=float, default=0, help="Minimum pident to report annotations for [0]")
-    parser.add_argument("-o", "--output", type=str, help="Output directory [reCOGnizer_results]",
-                        default='reCOGnizer_results')
-    parser.add_argument("-dr", "--download-resources", default=False, action="store_true",
-                        help='If resources for reCOGnizer are not available at "resources_directory" [false]')
-    parser.add_argument("-rd", "--resources-directory", type=str,
-                        help="Output directory for storing databases and other resources [~/resources_directory]",
-                        default=os.path.expanduser('~/resources_directory'))
-    parser.add_argument("-dbs", "--databases", type=str, nargs='+',
-                        choices=["CDD", "Pfam", "NCBIfam", "Protein_Clusters", "Smart", "TIGRFAM", "COG", "KOG"],
-                        default=["CDD", "Pfam", "NCBIfam", "Protein_Clusters", "Smart", "TIGRFAM", "COG", "KOG"],
-                        help="Databases to include in functional annotation [all available]")
-    parser.add_argument("-db", "--database", type=str, help="""Basename of database for annotation. 
-                        If multiple databases, use comma separated list (db1,db2,db3)""")
-    parser.add_argument("--custom-database", action="store_true", default=False,
-                        help="If database was NOT produced by reCOGnizer")
-    parser.add_argument("-seqs", "--max-target-seqs", type=str,
-                        help="Number of maximum identifications for each protein [1]", default="1")
-    parser.add_argument("--remove-spaces", action="store_true", default=False,
-                        help="""BLAST ignores sequences IDs after the first space.
-                        This option changes all spaces to underscores to keep the full IDs.""")
-    parser.add_argument("--no-output-sequences", action="store_true", default=False,
-                        help="Protein sequences from the FASTA input will be stored in their own column.")
-    parser.add_argument("--no-blast-info", action="store_true", default=False,
-                        help="Information from the alignment will be stored in their own columns.")
+    parser.add_argument(
+        "-o", "--output", type=str, help="Output directory [reCOGnizer_results]", default='reCOGnizer_results')
+    parser.add_argument(
+        "-dr", "--download-resources", default=False, action="store_true",
+        help='If resources for reCOGnizer are not available at "resources_directory" [false]')
+    parser.add_argument(
+        "-rd", "--resources-directory", type=str, default=os.path.expanduser('~/recognizer_resources'),
+        help="Output directory for storing databases and other resources [~/recognizer_resources]")
+    parser.add_argument(
+        "-dbs", "--databases", type=str, nargs='+',
+        choices=["CDD", "Pfam", "NCBIfam", "Protein_Clusters", "Smart", "TIGRFAM", "COG", "KOG"],
+        default=["CDD", "Pfam", "NCBIfam", "Protein_Clusters", "Smart", "TIGRFAM", "COG", "KOG"],
+        help="Databases to include in functional annotation [all available]")
+    parser.add_argument(
+        "-db", "--database", type=str,
+        help="Basename of database for annotation. If multiple databases, use comma separated list (db1,db2,db3)")
+    parser.add_argument(
+        "--custom-database", action="store_true", default=False, help="If database was NOT produced by reCOGnizer")
+    parser.add_argument(
+        "-mts", "--max-target-seqs", type=str, default="1",
+        help="Number of maximum identifications for each protein [1]")
+    parser.add_argument(
+        "--remove-spaces", action="store_true", default=False,
+        help="BLAST ignores sequences IDs after the first space. "
+             "This option changes all spaces to underscores to keep the full IDs.")
+    parser.add_argument(
+        "--no-output-sequences", action="store_true", default=False,
+        help="Protein sequences from the FASTA input will be stored in their own column.")
+    parser.add_argument(
+        "--no-blast-info", action="store_true", default=False,
+        help="Information from the alignment will be stored in their own columns.")
     parser.add_argument('-v', '--version', action='version', version=f'reCOGnizer {__version__}')
 
     requiredNamed = parser.add_argument_group('required named arguments')
-    requiredNamed.add_argument("-f", "--file", type=str, required=True,
-                               help="Fasta file with protein sequences for annotation")
+    requiredNamed.add_argument(
+        "-f", "--file", type=str, required=True, help="Fasta file with protein sequences for annotation")
+
+    taxArguments = parser.add_argument_group('taxonomy arguments')
+    taxArguments.add_argument(
+        "--tax-file", help="File with taxonomic identification of proteins inputted (TSV). "
+                           "Must have one line per query, query name on first column, taxid on second.")
+    taxArguments.add_argument(
+        "--protein-id-col", default='qseqid',
+        help="Name of column with protein headers as in supplied FASTA file [qseqid]")
+    taxArguments.add_argument(
+        "--tax-col", default='Taxonomic identifier (GENUS)',
+        help="Name of column with tax IDs of proteins [Taxonomic identifier (GENUS)]")
 
     args = parser.parse_args()
 
@@ -68,7 +88,7 @@ def get_arguments():
 
     for directory in [args.output, args.resources_directory]:
         if not os.path.isdir(directory):
-            pathlib.Path(directory).mkdir(parents=True, exist_ok=True)
+            Path(directory).mkdir(parents=True, exist_ok=True)
             print(f'Created {directory}')
 
     return args
@@ -78,38 +98,26 @@ def timed_message(message):
     print(f'{strftime("%Y-%m-%d %H:%M:%S", gmtime())}: {message}')
 
 
-def run_command(bashCommand, print_command=True, stdout=None):
+def run_command(bash_command, print_command=True, stdout=None):
     if print_command:
-        print(bashCommand)
-    subprocess.run(bashCommand.split(), stdout=stdout)
+        print(bash_command)
+    run(bash_command.split(), stdout=stdout)
 
 
-def run_pipe_command(bashCommand, file='', mode='w', print_message=True):
+def run_pipe_command(bash_command, file='', mode='w', print_message=True):
     if print_message:
-        print(bashCommand)
+        print(bash_command)
     if file == '':
-        subprocess.Popen(bashCommand, stdin=subprocess.PIPE, shell=True).communicate()
+        Popen(bash_command, stdin=PIPE, shell=True).communicate()
     elif file == 'PIPE':
-        return subprocess.Popen(bashCommand, stdin=subprocess.PIPE, shell=True,
-                                stdout=subprocess.PIPE).communicate()[0].decode('utf8')
+        return Popen(bash_command, stdin=PIPE, shell=True, stdout=PIPE).communicate()[0].decode('utf8')
     else:
         with open(file, mode) as output_file:
-            subprocess.Popen(bashCommand, stdin=subprocess.PIPE, shell=True, stdout=output_file).communicate()
+            Popen(bash_command, stdin=PIPE, shell=True, stdout=output_file).communicate()
 
 
 def parse_fasta(filename):
-    name = None
-    with open(filename) as file:
-        for line in file:
-            if line.startswith('>'):
-                if name:
-                    yield name, sequence
-                name = line[1:-1]
-                sequence = ''
-            else:
-                sequence += line[:-1]
-        yield name, sequence
-
+    return SeqIO.parse(filename, "fasta")
 
 def download_resources(directory):
     for location in [
@@ -120,7 +128,8 @@ def download_resources(directory):
         'ftp.ncbi.nlm.nih.gov/pub/COG/COG2020/data/fun-20.tab',
         'ftp.ncbi.nlm.nih.gov/pub/COG/COG2020/data/cog-20.def.tab',
         # COG2EC
-        'https://bitbucket.org/scilifelab-lts/lts-workflows-sm-metagenomics/raw/screening_legacy/lts_workflows_sm_metagenomics/source/utils/cog2ec.py',
+        'https://bitbucket.org/scilifelab-lts/lts-workflows-sm-metagenomics/raw/screening_legacy/'
+        'lts_workflows_sm_metagenomics/source/utils/cog2ec.py',
         'http://eggnogdb.embl.de/download/eggnog_4.5/eggnog4.protein_id_conversion.tsv.gz',
         'http://eggnogdb.embl.de/download/eggnog_4.5/data/NOG/NOG.members.tsv.gz',
         # NCBIfam, TIGRFAM, Pfam, PRK (protein clusters)
@@ -137,7 +146,7 @@ def download_resources(directory):
 
     # Extract the smps
     if sys.platform == "darwin":
-        if shutil.which('gtar') is None:
+        if which('gtar') is None:
             run_command('brew install gnu-tar')
         tool = 'gtar'
     else:
@@ -153,7 +162,7 @@ def run_rpsblast(query, output, reference, threads='0', max_target_seqs='1', eva
     bashCommand = ['rpsblast', '-query', query, '-db', reference, '-out', output, '-outfmt', '6',
                    '-num_threads', threads, '-max_target_seqs', max_target_seqs, '-evalue', str(evalue)]
     print(' '.join(bashCommand))
-    subprocess.run(bashCommand)
+    run(bashCommand)
 
 
 def parse_cddid(cddid):
@@ -198,8 +207,8 @@ def parse_blast(file):
         blast.columns = ['qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen',
                          'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore']
         return blast
-    return pd.DataFrame(columns=['qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen',
-                         'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore'])
+    return pd.DataFrame(columns=['qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen', 'qstart', 'qend',
+                                 'sstart', 'send', 'evalue', 'bitscore'])
 
 
 def pn2database(pn):
@@ -218,14 +227,13 @@ def create_split_db(smp_directory, output, db_prefix, threads='12'):
         obtained from ftp://ftp.ncbi.nih.gov/pub/mmdb/cdd/cdd.tar.gz
         output: basename for PN and databases
         threads: STR, number of threads that the workflow will use
-        step: number of SMP files per database
     Output:
         threads - 1 databases will be outputed, each with a consecutive part of
         the list of SMP files available. These databases are formated for RPS-BLAST
         search
     """
     print(f'Generating databases for [{threads}] threads.')
-    smp_list = glob.glob('{}/{}*.smp'.format(smp_directory, db_prefix))
+    smp_list = glob(f'{smp_directory}/{db_prefix}*.smp')
     parts = list(split(smp_list, int(threads)))
     for i in range(len(parts)):
         with open(f'{output}/{db_prefix}_{threads}_{i}.pn', 'w') as f:
@@ -233,6 +241,71 @@ def create_split_db(smp_directory, output, db_prefix, threads='12'):
 
     pool = Pool()
     pool.map(pn2database, [f'{output}/{db_prefix}_{threads}_{i}.pn' for i in range(len(parts))])
+
+
+def get_upper_taxid(taxid):
+    handle = Entrez.efetch(db="Taxonomy", id=taxid, retmode="xml")
+    records = Entrez.read(handle)
+    return records[0]['ParentTaxId']
+
+
+def get_upper_taxids(taxid):
+    taxids = list()
+    while taxid != '1':
+        taxids.append(taxid)
+        handle = Entrez.efetch(db="Taxonomy", id=taxid, retmode="xml")
+        records = Entrez.read(handle)
+        taxid = records[0]['ParentTaxId']
+    return taxids
+
+
+def get_all_taxids(taxids):
+    all_taxids = list()
+    for taxid in tqdm(taxids, desc=f'Listing all parent tax IDs for {len(taxids)} tax IDs'):
+        all_taxids += get_upper_taxids(taxid)
+    return set(all_taxids)
+
+
+def create_none_tax_db(smp_directory, output, db_prefix, hmm_pgap):
+    print(f'Generating {db_prefix} DB for HMMs with no taxonomy.')
+    hmm_pgap = hmm_pgap[hmm_pgap['source_identifier'].str.startswith(db_prefix)]
+    smp_list = [f'{smp_directory}/{source}' for source in hmm_pgap[hmm_pgap['taxonomic_range'].isnull()][
+                'source_identifier']]
+    with open(f'{output}/{db_prefix}_nan.pn', 'w') as f:
+        f.write('\n'.join([f'{file}.smp' for file in smp_list]))
+    pn2database(f'{output}/{db_prefix}_nan.pn')
+
+
+def create_tax_db(smp_directory, output, db_prefix, taxids, hmm_pgap):
+    """
+    Creates HMM DBs for all required tax IDs, and checks for DBS for cellular organisms and nan
+    :param smp_directory: (str) - Name of folder with the SMP files
+    :param output: (str) - Name of folder to output PN files and databases
+    :param db_prefix: (str) - Filename prefix for PN files and databases
+    :param taxids: (list) - list of tax ids present in the dataset
+    :param hmm_pgap: (pandas.DataFrame) - df with the information from the hmm_GAP.tsv file
+    """
+    hmm_pgap = hmm_pgap[hmm_pgap['source_identifier'].str.startswith(db_prefix)]
+    all_taxids = list()
+    for tax_id in tqdm(taxids, desc=f'Organizing PN files for [{len(taxids)}] Tax IDs.'):
+        repeated_taxon = False
+        while tax_id != '1' and not repeated_taxon:
+            if tax_id in all_taxids:
+                repeated_taxon = True
+            smp_list = [f'{smp_directory}/{source}' for source in hmm_pgap[hmm_pgap['taxonomic_range'] == int(tax_id)][
+                'source_identifier']]
+            if len(smp_list) > 0:
+                with open(f'{output}/{db_prefix}_{tax_id}.pn', 'w') as f:
+                    f.write('\n'.join([f'{file}.smp' for file in smp_list]))
+            all_taxids.append(tax_id)
+            tax_id = get_upper_taxid(tax_id)
+    '''
+    pool = Pool()
+    pool.map(pn2database, [f'{output}/{db_prefix}_{tax_id}.pn' for tax_id in all_taxids])
+    '''
+    for tax_id in all_taxids:
+        pn = f'{output}/{db_prefix}_{tax_id}.pn'
+        run_command(f"makeprofiledb -in {pn} -title {pn.split('.pn')[0]} -out {pn.split('.pn')[0]}")
 
 
 def validate_database(database):
@@ -262,12 +335,12 @@ def cog2ko(cogblast, cog2ko=f'{sys.path[0]}/resources_directory/cog2ko.ssv'):
                 run_command(f'wget -P {directory} {web_locations[file]}')
                 run_command(f'gunzip {directory}/{file}.gz')
         run_pipe_command(
-            """grep -E 'K[0-9]{5}$' """ + directory + """/protein.info.v11.0.txt | awk '{{if (length($NF) == 6) print $1, $NF}}'""",
+            """grep -E 'K[0-9]{5}$' """ + directory + """/protein.info.v11.0.txt | 
+            awk '{{if (length($NF) == 6) print $1, $NF}}'""",
             file=f'{directory}/string2ko.tsv')
         run_pipe_command(
-            """awk '{{if (length($4) == 7) print $1"\t"$4}}' {0}/COG.mappings.v11.0.txt | sort | join - {0}/string2ko.tsv""".format(
-                directory),
-            file=f'{directory}/cog2ko.ssv')
+            """awk '{{if (length($4) == 7) print $1"\t"$4}}' {0}/COG.mappings.v11.0.txt | sort | 
+            join - {0}/string2ko.tsv""".format(directory), file=f'{directory}/cog2ko.ssv')
         df = pd.read_csv(f'{directory}/cog2ko.ssv', sep=' ', names=['StringDB', 'COG', 'KO'])
         df[['COG', 'KO']].groupby('COG')['KO'].agg([('KO', ','.join)]).reset_index().to_csv(
             'f{directory}/cog2ko.tsv', sep='\t', index=False, header=['cog', 'KO'])
@@ -307,6 +380,28 @@ def write_cog_categories(data, output_basename):
     create_krona_plot(f'{output_basename}_quantification.tsv', f'{output_basename}_quantification.html')
 
 
+def count_on_file(expression, file, compressed=False):
+    return int(check_output(f"{'zgrep' if compressed else 'grep'} -c '{expression}' {file}", shell=True))
+
+
+def split_fasta_by_taxid(file, tax_file, tax_col, output):
+    fasta = parse_fasta(file)
+    record = next(fasta, None)
+    i = 1
+    number_of_proteins = count_on_file('>', file)
+    while record is not None:
+        if record.id in tax_file.index:
+            with open(f'{output}/{tax_file.loc[record.id][tax_col]}.fasta', 'a') as f:
+                f.write(f'{record.id}\n{str(record.seq)}\n')
+        else:
+            with open(f'{output}/nan.fasta', 'a') as f:
+                f.write(f'{record.id}\n{str(record.seq)}\n')
+        record = next(fasta, None)
+        if i % 1000 == 0 or i == number_of_proteins:
+            print(f'[{i}/{number_of_proteins}] proteins separated by taxon')
+        i += 1
+
+
 def main():
     # get arguments
     args = get_arguments()
@@ -314,30 +409,57 @@ def main():
     if args.download_resources:
         download_resources(args.resources_directory)
 
+    # Load the relational tables
+    cddid = parse_cddid(f'{args.resources_directory}/cddid_all.tbl')
+    hmm_pgap = pd.read_csv(f'{args.resources_directory}/hmm_PGAP.tsv', sep='\t', usecols=[1, 10, 12, 14, 15])
+    hmm_pgap['source_identifier'] = [ide.split('.')[0] for ide in hmm_pgap['source_identifier']]
+    hmm_pgap['source_identifier'] = hmm_pgap['source_identifier'].str.replace('PF', 'pfam')
+    fun = pd.read_csv(f'{sys.path[0]}/fun.tsv', sep='\t')
+
+    # Replacing spaces for commas
+    timed_message('Replacing spaces for commas')
+    if args.remove_spaces:
+        run_pipe_command(f"sed -i -e 's/ /_/g' {args.file}")
+
     if args.database:  # if database was inputted
-        inputted_db = True
         database_groups = args.database.split(',')
         for database in database_groups:
             if not validate_database(database):
                 exit('Some inputted database was not valid!')
-    else:
-        inputted_db = False
 
-        database_groups = list()
-        databases_prefixes = {'CDD': 'cd',
-                              'Pfam': 'pfam',
-                              'NCBIfam': 'NF',
-                              'Protein_Clusters': 'PRK',
-                              'Smart': 'smart',
-                              'TIGRFAM': 'TIGR',
-                              'COG': 'COG',
-                              'KOG': 'KOG'}
+        # run annotation with rps-blast and inputted database
+        timed_message('Running annotation with RPS-BLAST and inputted database as reference.')
+        run_rpsblast(args.file, f'{args.output}/aligned.blast', ' '.join(database_groups),
+                     threads=args.threads, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
+        return
+
+    else:
+        databases_prefixes = {
+            'CDD': 'cd', 'Pfam': 'pfam', 'NCBIfam': 'NF', 'Protein_Clusters': 'PRK', 'Smart': 'smart',
+            'TIGRFAM': 'TIGR', 'COG': 'COG', 'KOG': 'KOG'}
+
+        if hasattr(args, "tax_file"):
+            tax_file = pd.read_csv(args.tax_file, sep='\t', index_col=args.protein_id_col)
+            main_taxids = set(tax_file[args.tax_col])
+            main_taxids = [taxid for taxid in main_taxids if str(taxid) != 'nan']
+            #all_taxids = get_all_taxids(str(main_taxids))                                                        # of the supplied taxids, their parents are calculated
+            all_taxids = ('2191', '213422', '2158', '1239', 18, '69541', '28221', 2202, '2157', '2', '143067', '186802', '213462', 2222, '131567', '68298', 28231, '224756', '213421', '186801', '183925', 29526, '1783272', '28890', '1224', '68525', 862, '2283794', '2159', 2160, '94695', '2290931', '213465', '196137')
+            print(all_taxids)
+            all_taxids_in_hmm_pgap = [tid for tid in all_taxids if tid in hmm_pgap['taxonomic_range']]      # each of this parents should have a database if it is possible to have it
+            all_taxids_in_hmm_pgap.append('131567')     # cellular organisms
+
+            #split_fasta_by_taxid(args.file, tax_file, tax_col, args.output)
 
         for base in args.databases:
-            database_group = [f'{args.resources_directory}/{databases_prefixes[base]}_{args.threads}_{i}'
-                              for i in range(int(args.threads))]
+            if hasattr(args, "tax_file") and base in ['Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
+                database_group = [
+                    f'{args.resources_directory}/{databases_prefixes[base]}_{taxid}' for taxid in
+                    all_taxids_in_hmm_pgap]
+                print(database_group)
+            else:
+                database_group = [f'{args.resources_directory}/{databases_prefixes[base]}_{args.threads}_{i}'
+                                  for i in range(int(args.threads))]
             remake_dbs = False
-
             i = 0
             while not remake_dbs and i < len(database_group):
                 if not validate_database(database_group[i]):
@@ -347,39 +469,41 @@ def main():
 
             if remake_dbs:
                 # create database if it doesn't exit
-                create_split_db(args.resources_directory, args.resources_directory,
-                                databases_prefixes[base], args.threads)
+                if hasattr(args, "tax_file") and base in ['Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
+                    create_none_tax_db(
+                        args.resources_directory, args.resources_directory, databases_prefixes[base], hmm_pgap)
+                    create_tax_db(
+                        args.resources_directory, args.resources_directory, databases_prefixes[base],
+                        all_taxids_in_hmm_pgap, hmm_pgap)
+                else:
+                    create_split_db(
+                        args.resources_directory, args.resources_directory, databases_prefixes[base], args.threads)
             else:
-                print(f'A valid {base} split database for [{args.threads}] threads was found!')
+                if hasattr(args, "tax_file") and base in ['Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
+                    print(f'A valid {base} tax database for the [{len(all_taxids_in_hmm_pgap)}] Tax IDs was found!')
+                else:
+                    print(f'A valid {base} split database for [{args.threads}] threads was found!')
 
-            database_groups.append((base, database_group))
-
-    # Replacing spaces for commas
-    timed_message('Replacing spaces for commas')
-    if args.remove_spaces:
-        run_pipe_command(f"sed -i -e 's/ /_/g' {args.file}")
-
-    if inputted_db:
-        # run annotation with rps-blast and database
-        timed_message('Running annotation with RPS-BLAST and inputted database as reference.')
-        run_rpsblast(args.file, f'{args.output}/aligned.blast', ' '.join(database_groups),
-                     threads=args.threads, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
-    else:
-        for db_group in database_groups:
-            # run annotation with rps-blast and database
-            timed_message(f'Running annotation with RPS-BLAST and {db_group[0]} database as reference.')
-            run_rpsblast(args.file, f'{args.output}/{db_group[0]}_aligned.blast', ' '.join(db_group[1]),
-                         threads=args.threads, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
-
-    if inputted_db:
-        exit()
-
-    # Load the relational tables
-    cddid = parse_cddid(f'{args.resources_directory}/cddid_all.tbl')
-    ncbi_table = pd.read_csv(f'{args.resources_directory}/hmm_PGAP.tsv', sep='\t', usecols=[1, 10, 12, 15])
-    ncbi_table['source_identifier'] = [ide.split('.')[0] for ide in ncbi_table['source_identifier']]
-    ncbi_table['source_identifier'] = ncbi_table['source_identifier'].str.replace('PF', 'pfam')
-    fun = pd.read_csv(f'{sys.path[0]}/fun.tsv', sep='\t')
+            if hasattr(args, "tax_file") and base in ['Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
+                timed_message(f'Running annotation with RPS-BLAST and {base} database as reference.')
+                for taxid in main_taxids:
+                    dbs = [
+                        f'{args.resources_directory}/{databases_prefixes[base]}_{taxid}' for taxid in
+                        get_upper_taxids(taxid) + ['131567', 'nan']]
+                    run_rpsblast(
+                        f'{args.output}/{taxid}.fasta',
+                        f'{args.output}/{base}_{taxid}_aligned.blast', ' '.join(dbs),
+                        threads=args.threads,
+                        max_target_seqs=args.max_target_seqs, evalue=args.evalue)
+                run_pipe_command(f'''cat {" ".join(
+                        [f'{args.resources_directory}/{base}_{taxid}_aligned.blast' for taxid in main_taxids])}''',
+                                 file=f'{args.output}/{base}_aligned.blast')
+            else:
+                # run annotation with rps-blast and database
+                timed_message(f'Running annotation with RPS-BLAST and {base} database as reference.')
+                run_rpsblast(
+                    args.file, f'{args.output}/{base}_aligned.blast', ' '.join(database_group), threads=args.threads,
+                    max_target_seqs=args.max_target_seqs, evalue=args.evalue)
 
     timed_message("Organizing annotation results")
 
@@ -396,12 +520,12 @@ def main():
             fasta = parse_fasta(args.file)
             report['Sequence'] = pd.Series(dtype=str)
             report.set_index('qseqid', inplace=True)
-            for (name, sequence) in fasta:
-                report.at[name, 'Sequence'] = sequence
+            for entry in fasta:
+                report.at[entry.id, 'Sequence'] = str(entry.seq)
             report.reset_index(inplace=True)
 
         if db in ['CDD', 'Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
-            report = pd.merge(report, ncbi_table, left_on='DB ID', right_on='source_identifier', how='left')
+            report = pd.merge(report, hmm_pgap, left_on='DB ID', right_on='source_identifier', how='left')
             report.columns = report.columns.tolist()[:-3] + ['Protein description', 'EC number', 'taxonomic_range_name']
 
         elif db == 'Smart':

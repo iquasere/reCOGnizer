@@ -21,6 +21,11 @@ reCOGnizer performs domain-based annotation with RPS-BLAST and databases from CD
     * SMART annotations are complemented with SMART descriptions
     * COG and KOG annotations are complemented with COG categories and EC numbers and KEGG Orthologs (for COG)
 
+A detailed representation of reCOGnizer's workflow is presented in Fig. 1.
+
+![ScreenShot](recognizer_workflow.jpg)
+Fig. 1. Workflow of reGOGnizer, which includes the pre-analysis step of constructing databases, the domain-based annotation of inputted protein sequences, the interconversion of CDD IDs to other databases IDs, the ID mapping through several databases for obtaining information about the obtained IDs, and the output of information into TSV, Excel and HTML reports.
+
 ## Installing reCOGnizer
 
 To install reCOGnizer, clone this repository and run the install script:
@@ -50,10 +55,10 @@ recognizer.py -f input_file.fasta -o recognizer_output -rd resources_directory
 
 reCOGnizer takes a FASTA file as input and produces two main outputs into the output directory:
 * ```reCOGnizer_results.tsv```, a table with the annotations for each protein
-* ```cog_quantification``` and respective Krona representation (Fig. 1), which describes the functional landscape of the proteins in the input file
+* ```cog_quantification``` and respective Krona representation (Fig. 2), which describes the functional landscape of the proteins in the input file
 
 ![ScreenShot](krona_plot.png)
-Fig. 1. Krona plot with the quantification of COGs identified in the simulated dataset used to test [MOSCA](github.com/iquasere/MOSCA) and reCOGnizer.
+Fig. 2. Krona plot with the quantification of COGs identified in the simulated dataset used to test [MOSCA](github.com/iquasere/MOSCA) and reCOGnizer.
 
 ## Other parameters
 
