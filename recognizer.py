@@ -269,14 +269,14 @@ def get_all_taxids(taxids):
 def create_none_tax_db(smp_directory, output, db_prefix, hmm_pgap):
     print(f'Generating {db_prefix} DB for HMMs with no taxonomy.')
     hmm_pgap = hmm_pgap[hmm_pgap['source_identifier'].str.startswith(db_prefix)]
-    smp_list = [f'{smp_directory}/{source}' for source in hmm_pgap[hmm_pgap['taxonomic_range'].isnull()][
+    smp_list = [f'{smp_directory}/{source}' for source in hmm_pgap[hmm_pgap['taxonomic_range'] == 'nan'][
                 'source_identifier']]
     with open(f'{output}/{db_prefix}_nan.pn', 'w') as f:
         f.write('\n'.join([f'{file}.smp' for file in smp_list]))
     pn2database(f'{output}/{db_prefix}_nan.pn')
 
 
-def create_tax_db(smp_directory, output, db_prefix, taxids, hmm_pgap):
+def create_tax_db(smp_directory, output, db_prefix, taxids_with_db, taxids_lacking_db, hmm_pgap):
     """
     Creates HMM DBs for all required tax IDs, and checks for DBS for cellular organisms and nan
     :param smp_directory: (str) - Name of folder with the SMP files
@@ -286,33 +286,37 @@ def create_tax_db(smp_directory, output, db_prefix, taxids, hmm_pgap):
     :param hmm_pgap: (pandas.DataFrame) - df with the information from the hmm_GAP.tsv file
     """
     hmm_pgap = hmm_pgap[hmm_pgap['source_identifier'].str.startswith(db_prefix)]
-    all_taxids = list()
-    for tax_id in tqdm(taxids, desc=f'Organizing PN files for [{len(taxids)}] Tax IDs.'):
+    for tax_id in tqdm(taxids_lacking_db, desc=f'Organizing PN files for [{len(taxids_lacking_db)}] Tax IDs.'):
         repeated_taxon = False
         while tax_id != '1' and not repeated_taxon:
-            if tax_id in all_taxids:
+            if tax_id in taxids_with_db:
                 repeated_taxon = True
-            smp_list = [f'{smp_directory}/{source}' for source in hmm_pgap[hmm_pgap['taxonomic_range'] == int(tax_id)][
+            else:
+                taxids_with_db.append(tax_id)
+            smp_list = [f'{smp_directory}/{source}' for source in hmm_pgap[hmm_pgap['taxonomic_range'] == tax_id][
                 'source_identifier']]
             if len(smp_list) > 0:
+                print(f'{output}/{db_prefix}_{tax_id}.pn:{len(smp_list)}')
                 with open(f'{output}/{db_prefix}_{tax_id}.pn', 'w') as f:
                     f.write('\n'.join([f'{file}.smp' for file in smp_list]))
-            all_taxids.append(tax_id)
+                taxids_with_db.append(tax_id)
             tax_id = get_upper_taxid(tax_id)
     '''
     pool = Pool()
-    pool.map(pn2database, [f'{output}/{db_prefix}_{tax_id}.pn' for tax_id in all_taxids])
+    pool.map(pn2database, [f'{output}/{db_prefix}_{tax_id}.pn' for tax_id in taxids_with_db])
     '''
-    for tax_id in all_taxids:
+    for tax_id in taxids_with_db:
         pn = f'{output}/{db_prefix}_{tax_id}.pn'
         run_command(f"makeprofiledb -in {pn} -title {pn.split('.pn')[0]} -out {pn.split('.pn')[0]}")
+    return taxids_with_db
 
 
-def validate_database(database):
-    for ext in ['aux', 'freq', 'loo', 'phr', 'pin', 'pn', 'psd', 'psi', 'psq', 'rps']:
+def is_db_good(database):
+    for ext in ['aux', 'freq', 'loo', 'pdb', 'phr', 'pin', 'pos', 'pot', 'psq', 'ptf', 'pto', 'rps']:
         if not os.path.isfile(f'{database}.{ext}'):
             print(f'{database}.{ext} not found!')
             return False
+    print(f'{database} seems good!')
     return True
 
 
@@ -395,115 +399,144 @@ def split_fasta_by_taxid(file, tax_file, tax_col, output):
                 f.write(f'{record.id}\n{str(record.seq)}\n')
         else:
             with open(f'{output}/nan.fasta', 'a') as f:
-                f.write(f'{record.id}\n{str(record.seq)}\n')
+                f.write(f'>{record.id}\n{str(record.seq)}\n')
         record = next(fasta, None)
         if i % 1000 == 0 or i == number_of_proteins:
             print(f'[{i}/{number_of_proteins}] proteins separated by taxon')
         i += 1
 
 
+def check_tax_databases(smp_directory, output, db_prefix, taxids, hmm_pgap):
+    if not is_db_good(f'{smp_directory}/{db_prefix}_nan'):
+        create_none_tax_db(
+            smp_directory, smp_directory, db_prefix, hmm_pgap)
+    taxids_lacking_db = list()
+    taxids_with_db = list()
+    for taxid in taxids:
+        if not is_db_good(f'{smp_directory}/{db_prefix}_{taxid}'):
+            taxids_lacking_db.append(taxid)
+        else:
+            taxids_with_db.append(taxid)
+    print('taxids_lacking_db', taxids_lacking_db)
+    taxids_with_db += create_tax_db(smp_directory, output, db_prefix, taxids_with_db, taxids_lacking_db, hmm_pgap)
+    return taxids_with_db + ['nan']
+
+
+def check_threads_database(smp_directory, db_prefix, threads):
+    dbs = [f'{smp_directory}/{db_prefix}_{threads}_{i}' for i in range(int(threads))]
+    i = 0
+    remake_db = False
+    while not remake_db and i < len(dbs):
+        if not is_db_good(dbs[i]):
+            print(f'Some part of {db_prefix} was not valid!')
+            remake_db = True
+        i += 1
+    if remake_db:
+        create_split_db(smp_directory, smp_directory, db_prefix, threads)
+    else:
+        print(f'A valid {db_prefix} split database for [{threads}] threads was found!')
+
+
+def load_relational_tables(resources_directory):
+    cddid = parse_cddid(f'{resources_directory}/cddid_all.tbl')
+    hmm_pgap = pd.read_csv(f'{resources_directory}/hmm_PGAP.tsv', sep='\t', usecols=[1, 10, 12, 14, 15]).astype(str)
+    hmm_pgap['source_identifier'] = [ide.split('.')[0] for ide in hmm_pgap['source_identifier']]
+    hmm_pgap['source_identifier'] = hmm_pgap['source_identifier'].str.replace('PF', 'pfam')
+    hmm_pgap['taxonomic_range'] = [ide.split('.')[0] for ide in hmm_pgap['taxonomic_range']]
+    fun = pd.read_csv(f'{sys.path[0]}/fun.tsv', sep='\t')
+    return cddid, hmm_pgap, fun
+
+
+def replace_spaces_with_commas(file):
+    timed_message('Replacing spaces for commas')
+    run_pipe_command(f"sed -i -e 's/ /_/g' {file}")
+
+
+def taxids_of_interest(tax_file, protein_id_col, tax_col, hmm_pgap):
+    tax_file = pd.read_csv(tax_file, sep='\t', index_col=protein_id_col)
+    main_taxids = set(tax_file[tax_col].astype(str))
+    main_taxids = [taxid for taxid in main_taxids if taxid != 'nan']
+    #all_taxids = get_all_taxids(main_taxids)                                                        # of the supplied taxids, their parents are calculated
+    all_taxids = ('186802', '143067', '213465', '196137', '2', '2222', '28221', '28890', '862', '68298', '131567', '29526', '2160', '2158', '2290931', '69541', '1224', '18', '213422', '2202', '213462', '224756', '2157', '1783272', '183925', '94695', '1239', '68525', '28231', '2283794', '2191', '2159', '186801', '213421')
+    hmm_ids = set(hmm_pgap['taxonomic_range'])
+    all_taxids_in_hmm_pgap = [tid for tid in all_taxids if tid in hmm_ids]   # each of these parents should have a database if it is possible to have it
+    all_taxids_in_hmm_pgap.append('131567')  # cellular organisms
+    return tax_file, main_taxids, all_taxids_in_hmm_pgap
+
+
 def main():
-    # get arguments
     args = get_arguments()
 
     if args.download_resources:
         download_resources(args.resources_directory)
 
-    # Load the relational tables
-    cddid = parse_cddid(f'{args.resources_directory}/cddid_all.tbl')
-    hmm_pgap = pd.read_csv(f'{args.resources_directory}/hmm_PGAP.tsv', sep='\t', usecols=[1, 10, 12, 14, 15])
-    hmm_pgap['source_identifier'] = [ide.split('.')[0] for ide in hmm_pgap['source_identifier']]
-    hmm_pgap['source_identifier'] = hmm_pgap['source_identifier'].str.replace('PF', 'pfam')
-    fun = pd.read_csv(f'{sys.path[0]}/fun.tsv', sep='\t')
+    cddid, hmm_pgap, fun = load_relational_tables(args.resources_directory)
 
-    # Replacing spaces for commas
-    timed_message('Replacing spaces for commas')
     if args.remove_spaces:
-        run_pipe_command(f"sed -i -e 's/ /_/g' {args.file}")
+        replace_spaces_with_commas(args.file)
 
     if args.database:  # if database was inputted
-        database_groups = args.database.split(',')
-        for database in database_groups:
-            if not validate_database(database):
+        dbs = args.database.split(',')
+        for db in dbs:
+            if not is_db_good(db):
                 exit('Some inputted database was not valid!')
 
         # run annotation with rps-blast and inputted database
         timed_message('Running annotation with RPS-BLAST and inputted database as reference.')
-        run_rpsblast(args.file, f'{args.output}/aligned.blast', ' '.join(database_groups),
+        run_rpsblast(args.file, f'{args.output}/aligned.blast', ' '.join(dbs),
                      threads=args.threads, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
         return
 
     else:
+        if hasattr(args, "tax_file"):
+            tax_file, main_taxids, hmm_pgap_taxids = taxids_of_interest(
+                args.tax_file, args.protein_id_col, args.tax_col, hmm_pgap)
+            print('tax_file', tax_file)
+            print('main_taxids', main_taxids)
+            print('hmm_pgap_taxids', hmm_pgap_taxids)
+            #split_fasta_by_taxid(args.file, tax_file, args.tax_col, args.output)
+
         databases_prefixes = {
             'CDD': 'cd', 'Pfam': 'pfam', 'NCBIfam': 'NF', 'Protein_Clusters': 'PRK', 'Smart': 'smart',
             'TIGRFAM': 'TIGR', 'COG': 'COG', 'KOG': 'KOG'}
 
-        if hasattr(args, "tax_file"):
-            tax_file = pd.read_csv(args.tax_file, sep='\t', index_col=args.protein_id_col)
-            main_taxids = set(tax_file[args.tax_col])
-            main_taxids = [taxid for taxid in main_taxids if str(taxid) != 'nan']
-            #all_taxids = get_all_taxids(str(main_taxids))                                                        # of the supplied taxids, their parents are calculated
-            all_taxids = ('2191', '213422', '2158', '1239', 18, '69541', '28221', 2202, '2157', '2', '143067', '186802', '213462', 2222, '131567', '68298', 28231, '224756', '213421', '186801', '183925', 29526, '1783272', '28890', '1224', '68525', 862, '2283794', '2159', 2160, '94695', '2290931', '213465', '196137')
-            print(all_taxids)
-            all_taxids_in_hmm_pgap = [tid for tid in all_taxids if tid in hmm_pgap['taxonomic_range']]      # each of this parents should have a database if it is possible to have it
-            all_taxids_in_hmm_pgap.append('131567')     # cellular organisms
-
-            #split_fasta_by_taxid(args.file, tax_file, tax_col, args.output)
-
         for base in args.databases:
+            timed_message(f'Running annotation with RPS-BLAST and {base} database as reference.')
             if hasattr(args, "tax_file") and base in ['Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
-                database_group = [
-                    f'{args.resources_directory}/{databases_prefixes[base]}_{taxid}' for taxid in
-                    all_taxids_in_hmm_pgap]
-                print(database_group)
-            else:
-                database_group = [f'{args.resources_directory}/{databases_prefixes[base]}_{args.threads}_{i}'
-                                  for i in range(int(args.threads))]
-            remake_dbs = False
-            i = 0
-            while not remake_dbs and i < len(database_group):
-                if not validate_database(database_group[i]):
-                    print(f'Some part of {base} was not valid!')
-                    remake_dbs = True
-                i += 1
+                taxids_with_db = check_tax_databases(
+                    args.resources_directory, args.resources_directory, databases_prefixes[base], hmm_pgap_taxids,
+                    hmm_pgap)
+                print('hmm_pgap_taxids',hmm_pgap_taxids)
+                print('taxids_with_db',taxids_with_db)
 
-            if remake_dbs:
-                # create database if it doesn't exit
-                if hasattr(args, "tax_file") and base in ['Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
-                    create_none_tax_db(
-                        args.resources_directory, args.resources_directory, databases_prefixes[base], hmm_pgap)
-                    create_tax_db(
-                        args.resources_directory, args.resources_directory, databases_prefixes[base],
-                        all_taxids_in_hmm_pgap, hmm_pgap)
-                else:
-                    create_split_db(
-                        args.resources_directory, args.resources_directory, databases_prefixes[base], args.threads)
-            else:
-                if hasattr(args, "tax_file") and base in ['Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
-                    print(f'A valid {base} tax database for the [{len(all_taxids_in_hmm_pgap)}] Tax IDs was found!')
-                else:
-                    print(f'A valid {base} split database for [{args.threads}] threads was found!')
-
-            if hasattr(args, "tax_file") and base in ['Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
-                timed_message(f'Running annotation with RPS-BLAST and {base} database as reference.')
                 for taxid in main_taxids:
+                    parents_with_db = [
+                        ide for ide in get_upper_taxids(taxid) + ['131567', 'nan'] if ide in taxids_with_db]
+                    print('taxids_with_db',taxids_with_db)
+                    print('parents_with_db',parents_with_db)
                     dbs = [
-                        f'{args.resources_directory}/{databases_prefixes[base]}_{taxid}' for taxid in
-                        get_upper_taxids(taxid) + ['131567', 'nan']]
+                        f'{args.resources_directory}/{databases_prefixes[base]}_{taxid}' for taxid in parents_with_db]
+                    print('dbs',dbs)
                     run_rpsblast(
                         f'{args.output}/{taxid}.fasta',
-                        f'{args.output}/{base}_{taxid}_aligned.blast', ' '.join(dbs),
+                        f'{args.output}/{base}_{taxid}_aligned.blast',
+                        ' '.join(dbs),
                         threads=args.threads,
-                        max_target_seqs=args.max_target_seqs, evalue=args.evalue)
+                        max_target_seqs=args.max_target_seqs,
+                        evalue=args.evalue)
                 run_pipe_command(f'''cat {" ".join(
-                        [f'{args.resources_directory}/{base}_{taxid}_aligned.blast' for taxid in main_taxids])}''',
+                    [f'{args.resources_directory}/{base}_{taxid}_aligned.blast' for taxid in main_taxids])}''',
                                  file=f'{args.output}/{base}_aligned.blast')
             else:
-                # run annotation with rps-blast and database
-                timed_message(f'Running annotation with RPS-BLAST and {base} database as reference.')
+                check_threads_database(args.resources_directory, base, args.threads)
                 run_rpsblast(
-                    args.file, f'{args.output}/{base}_aligned.blast', ' '.join(database_group), threads=args.threads,
-                    max_target_seqs=args.max_target_seqs, evalue=args.evalue)
+                    args.file,
+                    f'{args.output}/{base}_aligned.blast',
+                    ' '.join([f'{args.resources_directory}/{databases_prefixes[base]}_{args.threads}_{i}'
+                              for i in range(int(args.threads))]),
+                    threads=args.threads,
+                    max_target_seqs=args.max_target_seqs,
+                    evalue=args.evalue)
 
     timed_message("Organizing annotation results")
 
@@ -529,8 +562,8 @@ def main():
             report.columns = report.columns.tolist()[:-3] + ['Protein description', 'EC number', 'taxonomic_range_name']
 
         elif db == 'Smart':
-            smart_table = pd.read_csv(f'{args.resources_directory}/descriptions.pl',
-                                      sep='\t', skiprows=2, header=None, usecols=[1, 2])
+            smart_table = pd.read_csv(
+                f'{args.resources_directory}/descriptions.pl', sep='\t', skiprows=2, header=None, usecols=[1, 2])
             smart_table.columns = ['Smart ID', 'Smart description']
             smart_table['Smart ID'] = smart_table['Smart ID'].str.replace('SM', 'smart')
             report = pd.merge(report, smart_table, left_on='DB ID', right_on='Smart ID', how='left')
