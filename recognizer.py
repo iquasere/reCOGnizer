@@ -139,7 +139,9 @@ def download_resources(directory):
         # KOG
         'https://ftp.ncbi.nlm.nih.gov/pub/COG/KOG/kog'
     ]:
-        run_command(f'wget {location} -P {directory}')
+        if os.path.isfile(f"{directory}/{location.split('/')[-1]}"):
+            if str2bool(input(f"{directory}/{location.split('/')[-1]} exists. Overwrite? [Y/N] ")):
+                run_command(f'wget {location} -P {directory}')
 
     for file in ['cddid_all.tbl', 'eggnog4.protein_id_conversion.tsv', 'NOG.members.tsv']:
         run_command(f'gunzip {directory}/{file}.gz')
@@ -155,6 +157,17 @@ def download_resources(directory):
     os.chdir(directory)
     run_pipe_command(f'{tool} -xzf cdd.tar.gz --wildcards "*.smp"')
     os.chdir(wd)
+
+
+def str2bool(v):
+    if v.lower() == 'auto':
+        return 'auto'
+    elif v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise ArgumentTypeError('Boolean value expected.')
 
 
 def run_rpsblast(query, output, reference, threads='0', max_target_seqs='1', evalue=10e-2):
@@ -276,38 +289,29 @@ def create_none_tax_db(smp_directory, output, db_prefix, hmm_pgap):
     pn2database(f'{output}/{db_prefix}_nan.pn')
 
 
-def create_tax_db(smp_directory, output, db_prefix, taxids_with_db, taxids_lacking_db, hmm_pgap):
+def create_tax_db(smp_directory, output, db_prefix, taxids, hmm_pgap):
     """
     Creates HMM DBs for all required tax IDs, and checks for DBS for cellular organisms and nan
     :param smp_directory: (str) - Name of folder with the SMP files
     :param output: (str) - Name of folder to output PN files and databases
     :param db_prefix: (str) - Filename prefix for PN files and databases
-    :param taxids: (list) - list of tax ids present in the dataset
+    :param taxids: (list) - list of tax ids present in the dataset lacking db
     :param hmm_pgap: (pandas.DataFrame) - df with the information from the hmm_GAP.tsv file
     """
-    hmm_pgap = hmm_pgap[hmm_pgap['source_identifier'].str.startswith(db_prefix)]
-    for tax_id in tqdm(taxids_lacking_db, desc=f'Organizing PN files for [{len(taxids_lacking_db)}] Tax IDs.'):
-        repeated_taxon = False
-        while tax_id != '1' and not repeated_taxon:
-            if tax_id in taxids_with_db:
-                repeated_taxon = True
-            else:
-                taxids_with_db.append(tax_id)
-            smp_list = [f'{smp_directory}/{source}' for source in hmm_pgap[hmm_pgap['taxonomic_range'] == tax_id][
-                'source_identifier']]
-            if len(smp_list) > 0:
-                print(f'{output}/{db_prefix}_{tax_id}.pn:{len(smp_list)}')
-                with open(f'{output}/{db_prefix}_{tax_id}.pn', 'w') as f:
-                    f.write('\n'.join([f'{file}.smp' for file in smp_list]))
-                taxids_with_db.append(tax_id)
-            tax_id = get_upper_taxid(tax_id)
+    taxids_with_db = list()
+    for taxid in tqdm(taxids, desc=f'Organizing PN files for [{len(taxids)}] Tax IDs.'):
+        smp_list = [f'{smp_directory}/{source}' for source in hmm_pgap[hmm_pgap['taxonomic_range'] == taxid][
+            'source_identifier']]
+        with open(f'{output}/{db_prefix}_{taxid}.pn', 'w') as f:
+            f.write('\n'.join([f'{file}.smp' for file in smp_list]))
     '''
     pool = Pool()
-    pool.map(pn2database, [f'{output}/{db_prefix}_{tax_id}.pn' for tax_id in taxids_with_db])
+    pool.map(pn2database, [f'{output}/{db_prefix}_{tax_id}.pn' for tax_id in taxids])
     '''
-    for tax_id in taxids_with_db:
-        pn = f'{output}/{db_prefix}_{tax_id}.pn'
+    for taxid in taxids:
+        pn = f'{output}/{db_prefix}_{taxid}.pn'
         run_command(f"makeprofiledb -in {pn} -title {pn.split('.pn')[0]} -out {pn.split('.pn')[0]}")
+        taxids_with_db.append(taxid)
     return taxids_with_db
 
 
@@ -396,7 +400,7 @@ def split_fasta_by_taxid(file, tax_file, tax_col, output):
     while record is not None:
         if record.id in tax_file.index:
             with open(f'{output}/{tax_file.loc[record.id][tax_col]}.fasta', 'a') as f:
-                f.write(f'{record.id}\n{str(record.seq)}\n')
+                f.write(f'>{record.id}\n{str(record.seq)}\n')
         else:
             with open(f'{output}/nan.fasta', 'a') as f:
                 f.write(f'>{record.id}\n{str(record.seq)}\n')
@@ -417,9 +421,8 @@ def check_tax_databases(smp_directory, output, db_prefix, taxids, hmm_pgap):
             taxids_lacking_db.append(taxid)
         else:
             taxids_with_db.append(taxid)
-    print('taxids_lacking_db', taxids_lacking_db)
-    taxids_with_db += create_tax_db(smp_directory, output, db_prefix, taxids_with_db, taxids_lacking_db, hmm_pgap)
-    return taxids_with_db + ['nan']
+    create_tax_db(smp_directory, output, db_prefix, taxids_lacking_db, hmm_pgap)
+    return taxids_with_db + taxids_lacking_db + ['nan']
 
 
 def check_threads_database(smp_directory, db_prefix, threads):
@@ -456,13 +459,65 @@ def taxids_of_interest(tax_file, protein_id_col, tax_col, hmm_pgap):
     tax_file = pd.read_csv(tax_file, sep='\t', index_col=protein_id_col)
     main_taxids = set(tax_file[tax_col].astype(str))
     main_taxids = [taxid for taxid in main_taxids if taxid != 'nan']
-    #all_taxids = get_all_taxids(main_taxids)                                                        # of the supplied taxids, their parents are calculated
-    all_taxids = ('186802', '143067', '213465', '196137', '2', '2222', '28221', '28890', '862', '68298', '131567', '29526', '2160', '2158', '2290931', '69541', '1224', '18', '213422', '2202', '213462', '224756', '2157', '1783272', '183925', '94695', '1239', '68525', '28231', '2283794', '2191', '2159', '186801', '213421')
-    hmm_ids = set(hmm_pgap['taxonomic_range'])
-    all_taxids_in_hmm_pgap = [tid for tid in all_taxids if tid in hmm_ids]   # each of these parents should have a database if it is possible to have it
-    all_taxids_in_hmm_pgap.append('131567')  # cellular organisms
-    return tax_file, main_taxids, all_taxids_in_hmm_pgap
+    return tax_file, main_taxids
 
+
+def get_hmm_pgap_taxids(main_taxids, db_prefix, hmm_pgap):
+    hmm_pgap = hmm_pgap[hmm_pgap['source_identifier'].str.startswith(db_prefix)]
+    # all_taxids = get_all_taxids(main_taxids)                                                        # of the supplied taxids, their parents are calculated
+    all_taxids = (
+    '186802', '143067', '213465', '196137', '2', '2222', '28221', '28890', '862', '68298', '29526', '2160', '2158',
+    '2290931', '69541', '1224', '18', '213422', '2202', '213462', '224756', '2157', '1783272', '183925', '94695',
+    '1239', '68525', '28231', '2283794', '2191', '2159', '186801', '213421')
+    hmm_ids = set(hmm_pgap['taxonomic_range'])
+    all_taxids_in_hmm_pgap = [tid for tid in all_taxids if
+                              tid in hmm_ids]  # each of these parents should have a database if it is possible to have it
+    all_taxids_in_hmm_pgap.append('131567')  # cellular organisms
+    return all_taxids_in_hmm_pgap
+
+
+def add_sequences(file, report):
+    fasta = parse_fasta(file)
+    report['Sequence'] = pd.Series(dtype=str)
+    report.set_index('qseqid', inplace=True)
+    for entry in fasta:
+        report.at[entry.id, 'Sequence'] = str(entry.seq)
+    report.reset_index(inplace=True)
+    return report
+
+
+def add_db_info(report, db, resources_directory, output):
+    if db in ['CDD', 'Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
+        report = pd.merge(report, hmm_pgap, left_on='DB ID', right_on='source_identifier', how='left')
+        report.columns = report.columns.tolist()[:-3] + ['Protein description', 'EC number', 'taxonomic_range_name']
+    elif db == 'Smart':
+        smart_table = pd.read_csv(
+            f'{resources_directory}/descriptions.pl', sep='\t', skiprows=2, header=None, usecols=[1, 2])
+        smart_table.columns = ['Smart ID', 'Smart description']
+        smart_table['Smart ID'] = smart_table['Smart ID'].str.replace('SM', 'smart')
+        report = pd.merge(report, smart_table, left_on='DB ID', right_on='Smart ID', how='left')
+        report.columns = report.columns.tolist()[:-1] + ['Protein description']
+    elif db == 'KOG':
+        kog_table = parse_kog(f'{resources_directory}/kog')
+        kog_table = pd.merge(kog_table, fun, left_on='KOG functional category (letter)',
+                             right_on='COG functional category (letter)', how='left')
+        report = pd.merge(report, kog_table, left_on='DB ID', right_on='kog', how='left')
+        report.columns = report.columns.tolist()[:-4] + ['Protein description'] + report.columns.tolist()[-3:]
+        write_cog_categories(report, f'{output}/KOG')
+    elif db == 'COG':
+        cog_table = parse_whog(f'{resources_directory}/cog-20.def.tab')
+        cog_table = pd.merge(cog_table, fun, on='COG functional category (letter)', how='left')
+        report = pd.merge(report, cog_table, left_on='DB ID', right_on='cog', how='left')
+        # cog2ec
+        report = cog2ec(report, table=f'{resources_directory}/cog2ec.tsv', resources_dir=resources_directory)
+        # cog2ko
+        report = cog2ko(report, cog2ko=f'{resources_directory}/cog2ko.tsv')
+        report.columns = report.columns.tolist()[:-5] + ['Protein description'] + report.columns.tolist()[-4:]
+        report.to_csv(f'{output}/COG_report.tsv', sep='\t', index=False)
+        write_cog_categories(report, f'{output}/COG')
+    else:
+        exit('Invalid database for retrieving further information!')
+    return report
 
 def main():
     args = get_arguments()
@@ -489,12 +544,10 @@ def main():
 
     else:
         if hasattr(args, "tax_file"):
-            tax_file, main_taxids, hmm_pgap_taxids = taxids_of_interest(
+            tax_file, main_taxids = taxids_of_interest(
                 args.tax_file, args.protein_id_col, args.tax_col, hmm_pgap)
-            print('tax_file', tax_file)
-            print('main_taxids', main_taxids)
-            print('hmm_pgap_taxids', hmm_pgap_taxids)
             #split_fasta_by_taxid(args.file, tax_file, args.tax_col, args.output)
+            #sed -i 's/NODE/>NODE/g' test_recognizer_taxonomy/*.fasta
 
         databases_prefixes = {
             'CDD': 'cd', 'Pfam': 'pfam', 'NCBIfam': 'NF', 'Protein_Clusters': 'PRK', 'Smart': 'smart',
@@ -503,20 +556,16 @@ def main():
         for base in args.databases:
             timed_message(f'Running annotation with RPS-BLAST and {base} database as reference.')
             if hasattr(args, "tax_file") and base in ['Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
+                hmm_pgap_taxids = get_hmm_pgap_taxids(main_taxids, databases_prefixes[base], hmm_pgap)
                 taxids_with_db = check_tax_databases(
                     args.resources_directory, args.resources_directory, databases_prefixes[base], hmm_pgap_taxids,
                     hmm_pgap)
-                print('hmm_pgap_taxids',hmm_pgap_taxids)
-                print('taxids_with_db',taxids_with_db)
 
                 for taxid in main_taxids:
                     parents_with_db = [
                         ide for ide in get_upper_taxids(taxid) + ['131567', 'nan'] if ide in taxids_with_db]
-                    print('taxids_with_db',taxids_with_db)
-                    print('parents_with_db',parents_with_db)
                     dbs = [
                         f'{args.resources_directory}/{databases_prefixes[base]}_{taxid}' for taxid in parents_with_db]
-                    print('dbs',dbs)
                     run_rpsblast(
                         f'{args.output}/{taxid}.fasta',
                         f'{args.output}/{base}_{taxid}_aligned.blast',
@@ -539,79 +588,24 @@ def main():
                     evalue=args.evalue)
 
     timed_message("Organizing annotation results")
-
     i = 1
-    j = len(args.databases)
+    xlsx_report = pd.ExcelWriter(f'{args.output}/reCOGnizer_results.xlsx', engine='xlsxwriter')
+    tsv_report
     for db in args.databases:
-        print(f'[{i}/{j}] Handling {db} identifications')
+        print(f'[{i}/{len(args.databases)}] Handling {db} identifications')
         report = parse_blast(f'{args.output}/{db}_aligned.blast')
         report = pd.merge(report, cddid, left_on='sseqid', right_on='CDD ID', how='left')
         del report['CDD ID']
-
         # adding protein sequences if requested
         if not args.no_output_sequences:
-            fasta = parse_fasta(args.file)
-            report['Sequence'] = pd.Series(dtype=str)
-            report.set_index('qseqid', inplace=True)
-            for entry in fasta:
-                report.at[entry.id, 'Sequence'] = str(entry.seq)
-            report.reset_index(inplace=True)
-
-        if db in ['CDD', 'Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
-            report = pd.merge(report, hmm_pgap, left_on='DB ID', right_on='source_identifier', how='left')
-            report.columns = report.columns.tolist()[:-3] + ['Protein description', 'EC number', 'taxonomic_range_name']
-
-        elif db == 'Smart':
-            smart_table = pd.read_csv(
-                f'{args.resources_directory}/descriptions.pl', sep='\t', skiprows=2, header=None, usecols=[1, 2])
-            smart_table.columns = ['Smart ID', 'Smart description']
-            smart_table['Smart ID'] = smart_table['Smart ID'].str.replace('SM', 'smart')
-            report = pd.merge(report, smart_table, left_on='DB ID', right_on='Smart ID', how='left')
-            report.columns = report.columns.tolist()[:-1] + ['Protein description']
-
-        elif db == 'KOG':
-            kog_table = parse_kog(f'{args.resources_directory}/kog')
-            kog_table = pd.merge(kog_table, fun, left_on='KOG functional category (letter)',
-                                 right_on='COG functional category (letter)', how='left')
-            report = pd.merge(report, kog_table, left_on='DB ID', right_on='kog', how='left')
-            report.columns = report.columns.tolist()[:-4] + ['Protein description'] + report.columns.tolist()[-3:]
-
-            write_cog_categories(report, f'{args.output}/KOG')
-
-        else:
-            cog_table = parse_whog(f'{args.resources_directory}/cog-20.def.tab')
-            cog_table = pd.merge(cog_table, fun, on='COG functional category (letter)', how='left')
-            report = pd.merge(report, cog_table, left_on='DB ID', right_on='cog', how='left')
-            # cog2ec
-            report = cog2ec(report, table=f'{args.resources_directory}/cog2ec.tsv',
-                            resources_dir=args.resources_directory)
-            # cog2ko
-            report = cog2ko(report, cog2ko=f'{args.resources_directory}/cog2ko.tsv')
-            report.columns = report.columns.tolist()[:-5] + ['Protein description'] + report.columns.tolist()[-4:]
-            report.to_csv(f'{args.output}/COG_report.tsv', sep='\t', index=False)
-
-            write_cog_categories(report, f'{args.output}/COG')
-
-        report.to_csv(f'{args.output}/{db}_report.tsv', sep='\t', index=False)
-        i += 1
-
-    timed_message(f'Filtering matches for: pident < {args.pident}')
-    writer = pd.ExcelWriter(f'{args.output}/reCOGnizer_results.xlsx', engine='xlsxwriter')
-
-    for base in tqdm(args.databases, desc=f'Organizing all results at {args.output}/reCOGnizer_results.xlsx'):
-        report = pd.read_csv(f'{args.output}/{base}_report.tsv', sep='\t')
-        report = report[report['pident'] > args.pident]
-        multi_sheet_excel(writer, report, sheet_name=base)
-    writer.save()
-
-    timed_message(f'Organizing all results at {args.output}/reCOGnizer_results.tsv')
-    all = pd.DataFrame()
-    for base in args.databases:
-        report = pd.read_csv(f'{args.output}/{base}_report.tsv', sep='\t')
-        report = report[report['pident'] > args.pident]
+            report = add_sequences(args.file, report)
+        report = add_db_info(report, db, args.resources_directory, args.output)
+        report = report[report['pident'] > args.pident]     # filter matches by pident
         all = pd.concat([all, report])
+        multi_sheet_excel(xlsx_report, report, sheet_name=base)
+        i += 1
     all.sort_values(by=['qseqid', 'DB ID']).to_csv(f'{args.output}/reCOGnizer_results.tsv', sep='\t', index=False)
-
+    xlsx_report.save()
 
 if __name__ == '__main__':
     start_time = time()
