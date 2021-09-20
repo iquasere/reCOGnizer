@@ -7,7 +7,7 @@ By João Sequeira
 Nov 2019
 """
 
-from argparse import ArgumentParser
+from argparse import ArgumentParser, ArgumentTypeError
 from glob import glob
 import os
 from pathlib import Path
@@ -24,6 +24,7 @@ from Bio import Entrez, SeqIO
 __version__ = '1.5.0'
 
 Entrez.email = "A.N.Other@example.com"
+
 
 def get_arguments():
     parser = ArgumentParser(
@@ -119,6 +120,7 @@ def run_pipe_command(bash_command, file='', mode='w', print_message=True):
 def parse_fasta(filename):
     return SeqIO.parse(filename, "fasta")
 
+
 def download_resources(directory):
     for location in [
         # Download CDD
@@ -172,7 +174,7 @@ def str2bool(v):
 
 def run_rpsblast(query, output, reference, threads='0', max_target_seqs='1', evalue=10e-2):
     # This run_command is different because of reference, which can't be split by space
-    bashCommand = ['rpsblast', '-query', query, '-db', reference, '-out', output, '-outfmt', '6',
+    bashCommand = ['rpsblast', '-query', query, '-db', reference, '-out', output, '-outfmt', '11',
                    '-num_threads', threads, '-max_target_seqs', max_target_seqs, '-evalue', str(evalue)]
     print(' '.join(bashCommand))
     run(bashCommand)
@@ -332,9 +334,9 @@ def cog2ec(cogblast, table=f'{sys.path[0]}/resources_directory/cog2ec.tsv',
     return pd.merge(cogblast, pd.read_csv(table, sep='\t', names=['cog', 'EC number']), on='cog', how='left')
 
 
-def cog2ko(cogblast, cog2ko=f'{sys.path[0]}/resources_directory/cog2ko.ssv'):
-    if not os.path.isfile(cog2ko):
-        directory = '/'.join(cog2ko.split('/')[:-1])
+def cog2ko(cogblast, cog2ko_ssv=f'{sys.path[0]}/resources_directory/cog2ko.ssv'):
+    if not os.path.isfile(cog2ko_ssv):
+        directory = '/'.join(cog2ko_ssv.split('/')[:-1])
         web_locations = {
             'COG.mappings.v11.0.txt': 'https://stringdb-static.org/download/COG.mappings.v11.0.txt.gz',
             'protein.info.v11.0.txt': 'https://stringdb-static.org/download/protein.info.v11.0.txt.gz'}
@@ -352,7 +354,7 @@ def cog2ko(cogblast, cog2ko=f'{sys.path[0]}/resources_directory/cog2ko.ssv'):
         df = pd.read_csv(f'{directory}/cog2ko.ssv', sep=' ', names=['StringDB', 'COG', 'KO'])
         df[['COG', 'KO']].groupby('COG')['KO'].agg([('KO', ','.join)]).reset_index().to_csv(
             'f{directory}/cog2ko.tsv', sep='\t', index=False, header=['cog', 'KO'])
-    return pd.merge(cogblast, pd.read_csv(cog2ko, sep='\t'), on='cog', how='left')
+    return pd.merge(cogblast, pd.read_csv(cog2ko_ssv, sep='\t'), on='cog', how='left')
 
 
 def write_table(table, output, out_format='excel', header=True):
@@ -455,7 +457,7 @@ def replace_spaces_with_commas(file):
     run_pipe_command(f"sed -i -e 's/ /_/g' {file}")
 
 
-def taxids_of_interest(tax_file, protein_id_col, tax_col, hmm_pgap):
+def taxids_of_interest(tax_file, protein_id_col, tax_col):
     tax_file = pd.read_csv(tax_file, sep='\t', index_col=protein_id_col)
     main_taxids = set(tax_file[tax_col].astype(str))
     main_taxids = [taxid for taxid in main_taxids if taxid != 'nan']
@@ -464,14 +466,9 @@ def taxids_of_interest(tax_file, protein_id_col, tax_col, hmm_pgap):
 
 def get_hmm_pgap_taxids(main_taxids, db_prefix, hmm_pgap):
     hmm_pgap = hmm_pgap[hmm_pgap['source_identifier'].str.startswith(db_prefix)]
-    # all_taxids = get_all_taxids(main_taxids)                                                        # of the supplied taxids, their parents are calculated
-    all_taxids = (
-    '186802', '143067', '213465', '196137', '2', '2222', '28221', '28890', '862', '68298', '29526', '2160', '2158',
-    '2290931', '69541', '1224', '18', '213422', '2202', '213462', '224756', '2157', '1783272', '183925', '94695',
-    '1239', '68525', '28231', '2283794', '2191', '2159', '186801', '213421')
+    all_taxids = get_all_taxids(main_taxids)                                # of the supplied taxids, their parents are calculated
     hmm_ids = set(hmm_pgap['taxonomic_range'])
-    all_taxids_in_hmm_pgap = [tid for tid in all_taxids if
-                              tid in hmm_ids]  # each of these parents should have a database if it is possible to have it
+    all_taxids_in_hmm_pgap = [tid for tid in all_taxids if tid in hmm_ids]  # each of these parents should have a database if it is possible to have it
     all_taxids_in_hmm_pgap.append('131567')  # cellular organisms
     return all_taxids_in_hmm_pgap
 
@@ -486,7 +483,59 @@ def add_sequences(file, report):
     return report
 
 
-def add_db_info(report, db, resources_directory, output):
+def run_rpsbproc(asn_report, resources_directory, evalue):
+    run_command(f'rpsbproc -i {asn_report} -o {asn_report.replace(".asn", ".better")} -d {resources_directory} '
+                f'-e {evalue} -m rep -f -t both')
+
+
+def parse_rpsbproc_section(handler, line, section_name, i):
+    data = list()
+    if line.startswith(section_name):
+        line = next(handler)
+        while not line.startswith(f'END{section_name}'):
+            data.append(line.rstrip('\n').split('\t')[i])
+            line = next(handler)
+        line = next(handler)
+    return list(set(data)), line
+
+
+def parse_rpsbproc(file):
+    file = open(file)
+    next(file)
+    next(file)
+    line = next(file)
+    result = pd.DataFrame(columns=['DOMAINS', 'SUPERFAMILIES', 'SITES', 'MOTIFS'])
+    while line.startswith('#'):     # skip first section
+        line = next(file)
+    line = next(file)
+    while not line.startswith('ENDDATA'):
+        line = next(file)
+        while not line.startswith('ENDSESSION'):
+            query = line.rstrip('\n').split('\t')[4]
+            domains, superfamilies, sites, motifs = list(), list(), list(), list()
+            line = next(file)
+            while not line.startswith('ENDQUERY'):
+                domains, line = parse_rpsbproc_section(file, line, 'DOMAINS', 3)
+                superfamilies, line = parse_rpsbproc_section(file, line, 'SUPERFAMILIES', 3)
+                sites, line = parse_rpsbproc_section(file, line, 'SITES', 7)
+                motifs, line = parse_rpsbproc_section(file, line, 'MOTIFS', 5)
+            result = result.append(pd.DataFrame(
+                [[domains, superfamilies, sites, motifs]], columns=result.columns, index=[query]))
+            line = next(file)
+        line = next(file)
+    return result
+
+
+def get_post_processing(asn_report, resources_directory, evalue):
+    run_rpsbproc(asn_report, resources_directory, evalue)
+    rpsbproc_report = parse_rpsbproc(asn_report.replace(".asn", ".better"))
+    for col in rpsbproc_report.columns.tolist()[1:]:    # exclude 'DOMAINS'
+        rpsbproc_report[col] = rpsbproc_report[col].apply(','.join)
+    rpsbproc_report = expand_by_list_column(rpsbproc_report, column='DOMAINS')
+    return rpsbproc_report
+
+
+def add_db_info(report, db, resources_directory, output, hmm_pgap, fun):
     if db in ['CDD', 'Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
         report = pd.merge(report, hmm_pgap, left_on='DB ID', right_on='source_identifier', how='left')
         report.columns = report.columns.tolist()[:-3] + ['Protein description', 'EC number', 'taxonomic_range_name']
@@ -511,13 +560,26 @@ def add_db_info(report, db, resources_directory, output):
         # cog2ec
         report = cog2ec(report, table=f'{resources_directory}/cog2ec.tsv', resources_dir=resources_directory)
         # cog2ko
-        report = cog2ko(report, cog2ko=f'{resources_directory}/cog2ko.tsv')
+        report = cog2ko(report, cog2ko_ssv=f'{resources_directory}/cog2ko.tsv')
         report.columns = report.columns.tolist()[:-5] + ['Protein description'] + report.columns.tolist()[-4:]
         report.to_csv(f'{output}/COG_report.tsv', sep='\t', index=False)
         write_cog_categories(report, f'{output}/COG')
     else:
         exit('Invalid database for retrieving further information!')
     return report
+
+
+def custom_database_workflow(file, output, threads, max_target_seqs, evalue, database):
+    dbs = database.split(',')
+    for db in dbs:
+        if not is_db_good(db):
+            exit('Some inputted database was not valid!')
+
+    # run annotation with rps-blast and inputted database
+    timed_message('Running annotation with RPS-BLAST and inputted database as reference.')
+    run_rpsblast(
+        file, f'{output}/aligned.blast', ' '.join(dbs), threads=threads, max_target_seqs=max_target_seqs, evalue=evalue)
+
 
 def main():
     args = get_arguments()
@@ -531,23 +593,12 @@ def main():
         replace_spaces_with_commas(args.file)
 
     if args.database:  # if database was inputted
-        dbs = args.database.split(',')
-        for db in dbs:
-            if not is_db_good(db):
-                exit('Some inputted database was not valid!')
-
-        # run annotation with rps-blast and inputted database
-        timed_message('Running annotation with RPS-BLAST and inputted database as reference.')
-        run_rpsblast(args.file, f'{args.output}/aligned.blast', ' '.join(dbs),
-                     threads=args.threads, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
-        return
-
+        custom_database_workflow(
+            args.file, args.output, args.threads, args.max_target_seqs, args.evalue, database=args.database)
     else:
         if hasattr(args, "tax_file"):
-            tax_file, main_taxids = taxids_of_interest(
-                args.tax_file, args.protein_id_col, args.tax_col, hmm_pgap)
-            #split_fasta_by_taxid(args.file, tax_file, args.tax_col, args.output)
-            #sed -i 's/NODE/>NODE/g' test_recognizer_taxonomy/*.fasta
+            tax_file, main_taxids = taxids_of_interest(args.tax_file, args.protein_id_col, args.tax_col)
+            split_fasta_by_taxid(args.file, tax_file, args.tax_col, args.output)
 
         databases_prefixes = {
             'CDD': 'cd', 'Pfam': 'pfam', 'NCBIfam': 'NF', 'Protein_Clusters': 'PRK', 'Smart': 'smart',
@@ -560,7 +611,6 @@ def main():
                 taxids_with_db = check_tax_databases(
                     args.resources_directory, args.resources_directory, databases_prefixes[base], hmm_pgap_taxids,
                     hmm_pgap)
-
                 for taxid in main_taxids:
                     parents_with_db = [
                         ide for ide in get_upper_taxids(taxid) + ['131567', 'nan'] if ide in taxids_with_db]
@@ -568,7 +618,7 @@ def main():
                         f'{args.resources_directory}/{databases_prefixes[base]}_{taxid}' for taxid in parents_with_db]
                     run_rpsblast(
                         f'{args.output}/{taxid}.fasta',
-                        f'{args.output}/{base}_{taxid}_aligned.blast',
+                        f'{args.output}/{base}_{taxid}_aligned.asn',
                         ' '.join(dbs),
                         threads=args.threads,
                         max_target_seqs=args.max_target_seqs,
@@ -580,32 +630,34 @@ def main():
                 check_threads_database(args.resources_directory, base, args.threads)
                 run_rpsblast(
                     args.file,
-                    f'{args.output}/{base}_aligned.blast',
+                    f'{args.output}/{base}_aligned.asn',
                     ' '.join([f'{args.resources_directory}/{databases_prefixes[base]}_{args.threads}_{i}'
                               for i in range(int(args.threads))]),
                     threads=args.threads,
                     max_target_seqs=args.max_target_seqs,
                     evalue=args.evalue)
 
-    timed_message("Organizing annotation results")
-    i = 1
-    xlsx_report = pd.ExcelWriter(f'{args.output}/reCOGnizer_results.xlsx', engine='xlsxwriter')
-    tsv_report
-    for db in args.databases:
-        print(f'[{i}/{len(args.databases)}] Handling {db} identifications')
-        report = parse_blast(f'{args.output}/{db}_aligned.blast')
-        report = pd.merge(report, cddid, left_on='sseqid', right_on='CDD ID', how='left')
-        del report['CDD ID']
-        # adding protein sequences if requested
-        if not args.no_output_sequences:
-            report = add_sequences(args.file, report)
-        report = add_db_info(report, db, args.resources_directory, args.output)
-        report = report[report['pident'] > args.pident]     # filter matches by pident
-        all = pd.concat([all, report])
-        multi_sheet_excel(xlsx_report, report, sheet_name=base)
-        i += 1
-    all.sort_values(by=['qseqid', 'DB ID']).to_csv(f'{args.output}/reCOGnizer_results.tsv', sep='\t', index=False)
-    xlsx_report.save()
+        timed_message("Organizing annotation results")
+        i = 1
+        xlsx_report = pd.ExcelWriter(f'{args.output}/reCOGnizer_results.xlsx', engine='xlsxwriter')
+        all_reports = pd.DataFrame()
+        for db in args.databases:
+            print(f'[{i}/{len(args.databases)}] Handling {db} identifications')
+            report = get_post_processing(f'{args.output}/{db}_aligned.blast', args.resources_directory, args.evalue)
+            report = pd.merge(report, cddid, left_on='DOMAINS', right_on='CDD ID', how='left')
+            del report['CDD ID']
+            # adding protein sequences if requested
+            if not args.no_output_sequences:
+                report = add_sequences(args.file, report)
+            report = add_db_info(report, db, args.resources_directory, args.output, hmm_pgap, fun)
+            report = report[report['pident'] > args.pident]     # filter matches by pident
+            all_reports = pd.concat([all_reports, report])
+            multi_sheet_excel(xlsx_report, report, sheet_name=db)
+            i += 1
+        all_reports.sort_values(by=['qseqid', 'DB ID']).to_csv(
+            f'{args.output}/reCOGnizer_results.tsv', sep='\t', index=False)
+        xlsx_report.save()
+
 
 if __name__ == '__main__':
     start_time = time()
