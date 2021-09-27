@@ -21,7 +21,7 @@ from multiprocessing import Pool, cpu_count
 from time import time, gmtime, strftime
 from Bio import Entrez, SeqIO
 
-__version__ = '1.5.0'
+__version__ = '1.5.1'
 
 Entrez.email = "A.N.Other@example.com"
 
@@ -602,6 +602,33 @@ def custom_database_workflow(file, output, threads, max_target_seqs, evalue, dat
         file, f'{output}/aligned.blast', ' '.join(dbs), threads=threads, max_target_seqs=max_target_seqs, evalue=evalue)
 
 
+def taxonomic_db_workflow(
+        output, resources_directory, threads, main_taxids, databases_prefixes, base, hmm_pgap,
+        max_target_seqs=1, evalue=1e-5):
+    hmm_pgap_taxids = get_hmm_pgap_taxids(main_taxids, databases_prefixes[base], hmm_pgap)
+    taxids_with_db = check_tax_databases(
+        resources_directory, resources_directory, databases_prefixes[base], hmm_pgap_taxids, hmm_pgap)
+    dbs = {taxid: [
+        f'{resources_directory}/{databases_prefixes[base]}_{parent_taxid}' for parent_taxid in
+        get_upper_taxids(taxid) + ['131567', 'nan'] if parent_taxid in taxids_with_db] for taxid in main_taxids}
+
+    with Pool(processes=threads) as p:
+        p.starmap(run_rpsblast, [(
+            f'{output}/{taxid}.fasta', f'{output}/{base}_{taxid}_aligned.asn', ' '.join(dbs[taxid]), '1',
+            max_target_seqs, evalue) for taxid in main_taxids])
+
+    with Pool(processes=threads) as p:
+        p.starmap(run_blast_formatter, [(
+            f'{output}/{base}_{taxid}_aligned.asn', f'{output}/{base}_{taxid}_aligned.blast') for taxid in main_taxids])
+
+    db_report = pd.DataFrame(columns=['qseqid', 'sseqid', 'SUPERFAMILIES', 'SITES', 'MOTIFS'])
+    for taxid in main_taxids:
+        report_6 = get_post_processing(f'{output}/{base}_{taxid}_aligned.asn', resources_directory, evalue)
+        blast = parse_blast(f'{output}/{base}_{taxid}_aligned.blast')
+        db_report = db_report.append(pd.merge(report_6, blast, on=['qseqid', 'sseqid'], how='left'))
+    db_report.to_csv(f'{output}/{base}_report.tsv', sep='\t')
+
+
 def main():
     args = get_arguments()
 
@@ -627,32 +654,9 @@ def main():
         for base in args.databases:
             timed_message(f'Running annotation with RPS-BLAST and {base} database as reference.')
             if hasattr(args, "tax_file") and base in ['Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
-                hmm_pgap_taxids = get_hmm_pgap_taxids(main_taxids, databases_prefixes[base], hmm_pgap)
-                taxids_with_db = check_tax_databases(
-                    args.resources_directory, args.resources_directory, databases_prefixes[base], hmm_pgap_taxids,
-                    hmm_pgap)
-                db_report = pd.DataFrame(columns=['qseqid', 'sseqid', 'SUPERFAMILIES', 'SITES', 'MOTIFS'])
-
-                for taxid in main_taxids:
-                    parents_with_db = [
-                        ide for ide in get_upper_taxids(taxid) + ['131567', 'nan'] if ide in taxids_with_db]
-                    dbs = [
-                        f'{args.resources_directory}/{databases_prefixes[base]}_{taxid}' for taxid in parents_with_db]
-
-                    run_rpsblast(
-                        f'{args.output}/{taxid}.fasta',
-                        f'{args.output}/{base}_{taxid}_aligned.asn',
-                        ' '.join(dbs),
-                        threads=args.threads,
-                        max_target_seqs=args.max_target_seqs,
-                        evalue=args.evalue)
-                    run_blast_formatter(
-                        f'{args.output}/{base}_{taxid}_aligned.asn', f'{args.output}/{base}_{taxid}_aligned.blast')
-                    report_6 = get_post_processing(
-                        f'{args.output}/{base}_{taxid}_aligned.asn', args.resources_directory, args.evalue)
-                    blast = parse_blast(f'{args.output}/{base}_{taxid}_aligned.blast')
-                    db_report = db_report.append(pd.merge(report_6, blast, on=['qseqid', 'sseqid'], how='left'))
-                db_report.to_csv(f'{args.output}/{base}_report.tsv', sep='\t')
+                taxonomic_db_workflow(
+                    args.output, args.resources_directory, args.threads, main_taxids, databases_prefixes, base,
+                    hmm_pgap, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
             else:
                 check_threads_database(args.resources_directory, base, args.threads)
                 run_rpsblast(
