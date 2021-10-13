@@ -12,7 +12,7 @@ from glob import glob
 import os
 from pathlib import Path
 from shutil import which
-from subprocess import run, Popen, PIPE, check_output
+from subprocess import run, Popen, PIPE, check_output, DEVNULL
 import sys
 import numpy as np
 import pandas as pd
@@ -30,7 +30,7 @@ def get_arguments():
     parser = ArgumentParser(
         description="reCOGnizer - a tool for domain based annotation with the COG database",
         epilog="Input file must be specified.")
-    parser.add_argument("-t", "--threads", type=str, default=str(cpu_count() - 2),
+    parser.add_argument("-t", "--threads", type=int, default=cpu_count() - 2,
                         help="Number of threads for reCOGnizer to use [max available - 2]")
     parser.add_argument("--evalue", type=float, default=1e-2, help="Maximum e-value to report annotations for [1e-2]")
     parser.add_argument("--pident", type=float, default=0, help="Minimum pident to report annotations for [0]")
@@ -53,8 +53,7 @@ def get_arguments():
     parser.add_argument(
         "--custom-database", action="store_true", default=False, help="If database was NOT produced by reCOGnizer")
     parser.add_argument(
-        "-mts", "--max-target-seqs", type=str, default="1",
-        help="Number of maximum identifications for each protein [1]")
+        "-mts", "--max-target-seqs", default=1, help="Number of maximum identifications for each protein [1]")
     parser.add_argument(
         "--remove-spaces", action="store_true", default=False,
         help="BLAST ignores sequences IDs after the first space. "
@@ -126,6 +125,7 @@ def download_resources(directory):
         # Download CDD
         'ftp://ftp.ncbi.nih.gov/pub/mmdb/cdd/cdd.tar.gz',
         'https://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/cddid_all.tbl.gz',
+        'https://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/cdd.info',   # only for versions
         # COG categories
         'ftp.ncbi.nlm.nih.gov/pub/COG/COG2020/data/fun-20.tab',
         'ftp.ncbi.nlm.nih.gov/pub/COG/COG2020/data/cog-20.def.tab',
@@ -172,12 +172,12 @@ def str2bool(v):
         raise ArgumentTypeError('Boolean value expected.')
 
 
-def run_rpsblast(query, output, reference, threads='0', max_target_seqs='1', evalue=1e-2):
+def run_rpsblast(query, output, reference, threads='0', max_target_seqs=1, evalue=1e-2):
     # This run_command is different because of reference, which can't be split by space
     bashCommand = ['rpsblast', '-query', query, '-db', reference, '-out', output, '-outfmt', '11',
-                   '-num_threads', threads, '-max_target_seqs', max_target_seqs, '-evalue', str(evalue)]
+                   '-num_threads', str(threads), '-max_target_seqs', str(max_target_seqs), '-evalue', str(evalue)]
     print(' '.join(bashCommand))
-    run(bashCommand)
+    run(bashCommand, stdout=DEVNULL)
 
 
 def parse_cddid(cddid):
@@ -219,11 +219,13 @@ def parse_kog(kog):
 def parse_blast(file):
     if os.stat(file).st_size != 0:
         blast = pd.read_csv(file, sep='\t', header=None)
-        blast.columns = ['qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen',
-                         'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore']
+        blast.columns = [
+            'qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen', 'qstart', 'qend', 'sstart', 'send', 'evalue',
+            'bitscore']
         return blast
-    return pd.DataFrame(columns=['qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen', 'qstart', 'qend',
-                                 'sstart', 'send', 'evalue', 'bitscore'])
+    return pd.DataFrame(columns=[
+        'qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen', 'qstart', 'qend', 'sstart', 'send', 'evalue',
+        'bitscore'])
 
 
 def pn2database(pn):
@@ -235,7 +237,7 @@ def split(a, n):
     return (a[i * k + min(i, m):(i + 1) * k + min(i + 1, m)] for i in range(n))
 
 
-def create_split_db(smp_directory, output, db_prefix, threads='12'):
+def create_split_db(smp_directory, output, db_prefix, threads=12):
     """
     Input:
         smp_directory: foldername where the SMP files are. These files are
@@ -249,51 +251,37 @@ def create_split_db(smp_directory, output, db_prefix, threads='12'):
     """
     print(f'Generating databases for [{threads}] threads.')
     smp_list = glob(f'{smp_directory}/{db_prefix}*.smp')
-    parts = list(split(smp_list, int(threads)))
+    parts = list(split(smp_list, threads))
     for i in range(len(parts)):
         with open(f'{output}/{db_prefix}_{threads}_{i}.pn', 'w') as f:
             f.write('\n'.join(parts[i]))
-
     pool = Pool()
     pool.map(pn2database, [f'{output}/{db_prefix}_{threads}_{i}.pn' for i in range(len(parts))])
 
 
-def get_upper_taxid(taxid):
-    handle = Entrez.efetch(db="Taxonomy", id=taxid, retmode="xml")
-    records = Entrez.read(handle)
-    return records[0]['ParentTaxId']
-
-
-def get_upper_taxids(taxid):
+def get_upper_taxids(taxid, tax_df):
+    """
+    :param taxid: str - taxID to get upper taxIDs from
+    :param tax_df: pd.DataFrame - of read taxonomy.tsv (from taxonomy.rdf)
+    :returns list - of upper taxIDs
+    """
     taxids = list()
-    while taxid != '1':
+    while taxid != '1' and taxid != 'Taxon':
         taxids.append(taxid)
-        handle = Entrez.efetch(db="Taxonomy", id=taxid, retmode="xml")
-        records = Entrez.read(handle)
-        taxid = records[0]['ParentTaxId']
+        taxid = tax_df.loc[taxid]['parent_taxid']
     return taxids
 
 
-def get_all_taxids(taxids):
+def get_all_taxids(taxids, taxonomy_df):
     all_taxids = list()
     for taxid in tqdm(taxids, desc=f'Listing all parent tax IDs for {len(taxids)} tax IDs'):
-        all_taxids += get_upper_taxids(taxid)
-    return set(all_taxids)
-
-
-def create_none_tax_db(smp_directory, output, db_prefix, hmm_pgap):
-    print(f'Generating {db_prefix} DB for HMMs with no taxonomy.')
-    hmm_pgap = hmm_pgap[hmm_pgap['source_identifier'].str.startswith(db_prefix)]
-    smp_list = [f'{smp_directory}/{source}' for source in hmm_pgap[hmm_pgap['taxonomic_range'] == 'nan'][
-                'source_identifier']]
-    with open(f'{output}/{db_prefix}_nan.pn', 'w') as f:
-        f.write('\n'.join([f'{file}.smp' for file in smp_list]))
-    pn2database(f'{output}/{db_prefix}_nan.pn')
+        all_taxids += get_upper_taxids(taxid, taxonomy_df)
+    return set(all_taxids + ['0'])
 
 
 def create_tax_db(smp_directory, output, db_prefix, taxids, hmm_pgap):
     """
-    Creates HMM DBs for all required tax IDs, and checks for DBS for cellular organisms and nan
+    Creates HMM DBs for all required tax IDs, and checks for DBS for cellular organisms and 0 (nan)
     :param smp_directory: (str) - Name of folder with the SMP files
     :param output: (str) - Name of folder to output PN files and databases
     :param db_prefix: (str) - Filename prefix for PN files and databases
@@ -301,11 +289,13 @@ def create_tax_db(smp_directory, output, db_prefix, taxids, hmm_pgap):
     :param hmm_pgap: (pandas.DataFrame) - df with the information from the hmm_GAP.tsv file
     """
     taxids_with_db = list()
+    if len(taxids) == 0:
+        return []
     for taxid in tqdm(taxids, desc=f'Organizing PN files for [{len(taxids)}] Tax IDs.'):
         smp_list = [f'{smp_directory}/{source}' for source in hmm_pgap[hmm_pgap['taxonomic_range'] == taxid][
             'source_identifier']]
         with open(f'{output}/{db_prefix}_{taxid}.pn', 'w') as f:
-            f.write('\n'.join([f'{file}.smp' for file in smp_list]))
+            f.write('\n'.join([f'{file}.smp' for file in set(smp_list)]))
     '''
     pool = Pool()
     pool.map(pn2database, [f'{output}/{db_prefix}_{tax_id}.pn' for tax_id in taxids])
@@ -395,47 +385,40 @@ def count_on_file(expression, file, compressed=False):
 
 
 def split_fasta_by_taxid(file, tax_file, tax_col, output):
-    for tfile in [f'{output}/{taxid}.fasta' for taxid in set(tax_file[tax_col].tolist() + ['nan'])]:
+    for tfile in [f'{output}/{taxid}.fasta' for taxid in set(tax_file[tax_col].tolist())]:
         if os.path.isfile(tfile):
             os.remove(tfile)
     fasta = parse_fasta(file)
     record = next(fasta, None)
     i = 1
     number_of_proteins = count_on_file('>', file)
-    main_taxids = list()
     while record is not None:
         if record.id in tax_file.index:
             with open(f'{output}/{tax_file.loc[record.id][tax_col]}.fasta', 'a') as f:
                 f.write(f'>{record.id}\n{str(record.seq)}\n')
-            if tax_file.loc[record.id][tax_col] not in main_taxids:
-                main_taxids.append(tax_file.loc[record.id][tax_col])
         else:
-            with open(f'{output}/nan.fasta', 'a') as f:
+            with open(f'{output}/0.fasta', 'a') as f:
                 f.write(f'>{record.id}\n{str(record.seq)}\n')
         record = next(fasta, None)
         if i % 1000 == 0 or i == number_of_proteins:
             print(f'[{i}/{number_of_proteins}] proteins separated by taxon')
         i += 1
-    return set(main_taxids)
 
 
 def check_tax_databases(smp_directory, output, db_prefix, taxids, hmm_pgap):
-    if not is_db_good(f'{smp_directory}/{db_prefix}_nan'):
-        create_none_tax_db(
-            smp_directory, smp_directory, db_prefix, hmm_pgap)
     taxids_lacking_db = list()
     taxids_with_db = list()
-    for taxid in taxids:
+    for taxid in list(taxids):
         if not is_db_good(f'{smp_directory}/{db_prefix}_{taxid}'):
             taxids_lacking_db.append(taxid)
         else:
             taxids_with_db.append(taxid)
     create_tax_db(smp_directory, output, db_prefix, taxids_lacking_db, hmm_pgap)
-    return taxids_with_db + taxids_lacking_db + ['nan']
+    return taxids_with_db + taxids_lacking_db
 
 
 def check_threads_database(smp_directory, db_prefix, threads):
-    dbs = [f'{smp_directory}/{db_prefix}_{threads}_{i}' for i in range(int(threads))]
+    dbs = [f'{smp_directory}/{db_prefix}_{threads}_{i}' for i in range(threads)]
     i = 0
     remake_db = False
     while not remake_db and i < len(dbs):
@@ -452,12 +435,18 @@ def check_threads_database(smp_directory, db_prefix, threads):
 def load_relational_tables(resources_directory):
     cddid = parse_cddid(f'{resources_directory}/cddid_all.tbl')
     cddid['CDD ID'] = cddid['CDD ID'].apply(lambda x: f'CDD:{x}')
-    hmm_pgap = pd.read_csv(f'{resources_directory}/hmm_PGAP.tsv', sep='\t', usecols=[1, 10, 12, 14, 15]).astype(str)
+    hmm_pgap = pd.read_csv(f'{resources_directory}/hmm_PGAP.tsv', sep='\t', usecols=[1, 10, 12, 14, 15])
     hmm_pgap['source_identifier'] = [ide.split('.')[0] for ide in hmm_pgap['source_identifier']]
     hmm_pgap['source_identifier'] = hmm_pgap['source_identifier'].str.replace('PF', 'pfam')
-    hmm_pgap['taxonomic_range'] = [ide.split('.')[0] for ide in hmm_pgap['taxonomic_range']]
+    smps = [filename.split('/')[-1].rstrip('.smp') for filename in glob(f'{resources_directory}/*.smp')]
+    hmm_pgap = hmm_pgap[hmm_pgap['source_identifier'].isin(smps)]
+    hmm_pgap['taxonomic_range'] = hmm_pgap['taxonomic_range'].fillna(0.0).apply(
+        lambda x: str(int(x)) if type(x) == float else x)
     fun = pd.read_csv(f'{sys.path[0]}/fun.tsv', sep='\t')
-    return cddid, hmm_pgap, fun
+    taxonomy_df = pd.read_csv(f'{resources_directory}/taxonomy.tsv', sep='\t', index_col='taxid')
+    taxonomy_df['parent_taxid'] = taxonomy_df['parent_taxid'].fillna(0.0).apply(
+        lambda x: str(int(x)) if type(x) == float else x)
+    return cddid, hmm_pgap, fun, taxonomy_df
 
 
 def replace_spaces_with_commas(file):
@@ -467,17 +456,16 @@ def replace_spaces_with_commas(file):
 
 def taxids_of_interest(tax_file, protein_id_col, tax_col):
     tax_file = pd.read_csv(tax_file, sep='\t', index_col=protein_id_col)
-    main_taxids = set(tax_file[tax_col].astype(str))
-    main_taxids = [taxid for taxid in main_taxids if taxid != 'nan']
-    return tax_file, main_taxids
+    tax_file[tax_col] = tax_file[tax_col].fillna(0.0).astype(int).astype(str)
+    return tax_file, set(tax_file[tax_col].tolist())
 
 
-def get_hmm_pgap_taxids(main_taxids, db_prefix, hmm_pgap):
+def get_hmm_pgap_taxids(main_taxids, db_prefix, hmm_pgap, taxonomy_df):
+    all_taxids = get_all_taxids(main_taxids, taxonomy_df)                   # of the supplied taxids, their parents are calculated
+    all_taxids = list(all_taxids) + ['131567', '0']                         # cellular organisms and no taxonomy
     hmm_pgap = hmm_pgap[hmm_pgap['source_identifier'].str.startswith(db_prefix)]
-    all_taxids = get_all_taxids(main_taxids)                                # of the supplied taxids, their parents are calculated
     hmm_ids = set(hmm_pgap['taxonomic_range'])
     all_taxids_in_hmm_pgap = [tid for tid in all_taxids if tid in hmm_ids]  # each of these parents should have a database if it is possible to have it
-    all_taxids_in_hmm_pgap.append('131567')  # cellular organisms
     return all_taxids_in_hmm_pgap
 
 
@@ -595,7 +583,6 @@ def custom_database_workflow(file, output, threads, max_target_seqs, evalue, dat
     for db in dbs:
         if not is_db_good(db):
             exit('Some inputted database was not valid!')
-
     # run annotation with rps-blast and inputted database
     timed_message('Running annotation with RPS-BLAST and inputted database as reference.')
     run_rpsblast(
@@ -603,14 +590,14 @@ def custom_database_workflow(file, output, threads, max_target_seqs, evalue, dat
 
 
 def taxonomic_db_workflow(
-        output, resources_directory, threads, main_taxids, databases_prefixes, base, hmm_pgap,
+        output, resources_directory, threads, main_taxids, databases_prefixes, base, hmm_pgap, taxonomy_df,
         max_target_seqs=1, evalue=1e-5):
-    hmm_pgap_taxids = get_hmm_pgap_taxids(main_taxids, databases_prefixes[base], hmm_pgap)
+    hmm_pgap_taxids = get_hmm_pgap_taxids(main_taxids, databases_prefixes[base], hmm_pgap, taxonomy_df)
     taxids_with_db = check_tax_databases(
         resources_directory, resources_directory, databases_prefixes[base], hmm_pgap_taxids, hmm_pgap)
     dbs = {taxid: [
         f'{resources_directory}/{databases_prefixes[base]}_{parent_taxid}' for parent_taxid in
-        get_upper_taxids(taxid) + ['131567', 'nan'] if parent_taxid in taxids_with_db] for taxid in main_taxids}
+        get_upper_taxids(taxid, taxonomy_df) + ['0'] if parent_taxid in taxids_with_db] for taxid in main_taxids}
 
     with Pool(processes=threads) as p:
         p.starmap(run_rpsblast, [(
@@ -635,7 +622,7 @@ def main():
     if args.download_resources:
         download_resources(args.resources_directory)
 
-    cddid, hmm_pgap, fun = load_relational_tables(args.resources_directory)
+    cddid, hmm_pgap, fun, taxonomy_df = load_relational_tables(args.resources_directory)
 
     if args.remove_spaces:
         replace_spaces_with_commas(args.file)
@@ -646,24 +633,25 @@ def main():
     else:
         if hasattr(args, "tax_file"):
             tax_file, main_taxids = taxids_of_interest(args.tax_file, args.protein_id_col, args.tax_col)
-            main_taxids = split_fasta_by_taxid(args.file, tax_file, args.tax_col, args.output)
+            split_fasta_by_taxid(args.file, tax_file, args.tax_col, args.output)
         databases_prefixes = {
             'CDD': 'cd', 'Pfam': 'pfam', 'NCBIfam': 'NF', 'Protein_Clusters': 'PRK', 'Smart': 'smart',
             'TIGRFAM': 'TIGR', 'COG': 'COG', 'KOG': 'KOG'}
 
         for base in args.databases:
+            db_hmm_pgap = hmm_pgap[hmm_pgap['source_identifier'].str.startswith(databases_prefixes[base])]
             timed_message(f'Running annotation with RPS-BLAST and {base} database as reference.')
             if hasattr(args, "tax_file") and base in ['Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
                 taxonomic_db_workflow(
                     args.output, args.resources_directory, args.threads, main_taxids, databases_prefixes, base,
-                    hmm_pgap, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
+                    db_hmm_pgap, taxonomy_df, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
             else:
-                check_threads_database(args.resources_directory, base, args.threads)
+                check_threads_database(args.resources_directory, databases_prefixes[base], args.threads)
                 run_rpsblast(
                     args.file,
                     f'{args.output}/{base}_aligned.asn',
                     ' '.join([f'{args.resources_directory}/{databases_prefixes[base]}_{args.threads}_{i}'
-                              for i in range(int(args.threads))]),
+                              for i in range(args.threads)]),
                     threads=args.threads,
                     max_target_seqs=args.max_target_seqs,
                     evalue=args.evalue)
