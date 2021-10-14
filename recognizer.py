@@ -482,7 +482,7 @@ def add_sequences(file, report):
 def run_rpsbproc(asn_report, resources_directory, evalue):
     run_pipe_command(
         f'rpsbproc -i {asn_report} -o {asn_report.replace(".asn", ".better")} -d {resources_directory} -e {evalue} '
-        f'-m rep -f -t both 2>rpsbproc.err')
+        f'-m rep -f -t both 2>verbose.log')
 
 
 def parse_rpsbproc_section(handler, line, section_name, i):
@@ -526,7 +526,7 @@ def parse_rpsbproc(file):
 
 
 def run_blast_formatter(archive, output, outfmt='6'):
-    run_command(f'blast_formatter -archive {archive} -outfmt {outfmt} -out {output}')
+    run_pipe_command(f'blast_formatter -archive {archive} -outfmt {outfmt} -out {output} 2>verbose.log')
 
 
 def get_post_processing(asn_report, resources_directory, evalue):
@@ -616,6 +616,19 @@ def taxonomic_db_workflow(
     db_report.to_csv(f'{output}/{base}_report.tsv', sep='\t')
 
 
+def multithreaded_db_workflow(
+        file, output, resources_directory, threads, databases_prefixes, base, max_target_seqs=5, evalue=0.01):
+    check_threads_database(resources_directory, databases_prefixes[base], threads)
+    run_rpsblast(
+        file, f'{output}/{base}_aligned.asn',
+        ' '.join([f'{resources_directory}/{databases_prefixes[base]}_{threads}_{i}' for i in range(threads)]),
+        threads=threads, max_target_seqs=max_target_seqs, evalue=evalue)
+    run_blast_formatter(f'{output}/{base}_aligned.asn', f'{output}/{base}_aligned.blast')
+    report_6 = get_post_processing(f'{output}/{base}_aligned.asn', resources_directory, evalue)
+    pd.merge(report_6, parse_blast(f'{output}/{base}_aligned.blast'), on=['qseqid', 'sseqid'], how='left').to_csv(
+        f'{output}/{base}_report.tsv', sep='\t')
+
+
 def main():
     args = get_arguments()
 
@@ -646,15 +659,9 @@ def main():
                     args.output, args.resources_directory, args.threads, main_taxids, databases_prefixes, base,
                     db_hmm_pgap, taxonomy_df, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
             else:
-                check_threads_database(args.resources_directory, databases_prefixes[base], args.threads)
-                run_rpsblast(
-                    args.file,
-                    f'{args.output}/{base}_aligned.asn',
-                    ' '.join([f'{args.resources_directory}/{databases_prefixes[base]}_{args.threads}_{i}'
-                              for i in range(args.threads)]),
-                    threads=args.threads,
-                    max_target_seqs=args.max_target_seqs,
-                    evalue=args.evalue)
+                multithreaded_db_workflow(
+                    args.file, args.output, args.resources_directory, args.threads, databases_prefixes, base,
+                    max_target_seqs=args.max_target_seqs, evalue=args.evalue)
 
         timed_message("Organizing annotation results")
         i = 1
@@ -662,12 +669,11 @@ def main():
         all_reports = pd.DataFrame()
         for db in args.databases:
             print(f'[{i}/{len(args.databases)}] Handling {db} annotation')
-            report = pd.read_csv(f'{args.output}/{base}_report.tsv', sep='\t', index_col=0)
+            report = pd.read_csv(f'{args.output}/{db}_report.tsv', sep='\t', index_col=0)
             report = pd.merge(report, cddid, left_on='sseqid', right_on='CDD ID', how='left')
             del report['CDD ID']
-            # adding protein sequences if requested
             if not args.no_output_sequences:
-                report = add_sequences(args.file, report)
+                report = add_sequences(args.file, report)       # adding protein sequences if requested
             report = add_db_info(report, db, args.resources_directory, args.output, hmm_pgap, fun)
             report = report[report['pident'] > args.pident]     # filter matches by pident
             all_reports = pd.concat([all_reports, report])
