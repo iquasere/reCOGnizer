@@ -20,6 +20,8 @@ from tqdm import tqdm
 from multiprocessing import Pool, cpu_count
 from time import time, gmtime, strftime
 from Bio import Entrez, SeqIO
+from requests import get as requests_get
+import xml.etree.ElementTree as ET
 
 __version__ = '1.5.1'
 
@@ -120,6 +122,29 @@ def parse_fasta(filename):
     return SeqIO.parse(filename, "fasta")
 
 
+def get_tabular_taxonomy(output):
+    res = requests_get('https://ftp.uniprot.org/pub/databases/uniprot/current_release/rdf/taxonomy.rdf.xz')
+    with open('taxonomy.rdf.xz', 'wb') as f:
+        f.write(res.content)
+    run_command(f'unxz taxonomy.rdf.xz')
+    print('Reading RDF taxonomy')
+    root = ET.parse('taxonomy.rdf').getroot()
+    elems = root.findall('{http://www.w3.org/1999/02/22-rdf-syntax-ns#}Description')
+    with open(output, 'w') as f:
+        written = f.write('\t'.join(['taxid','name','rank','parent_taxid']) + '\n')
+        for elem in tqdm(elems, desc='Converting XML taxonomy.rdf to TSV format'):
+            info = [elem.get('{http://www.w3.org/1999/02/22-rdf-syntax-ns#}about').split('/')[-1]]
+            scientific_name = elem.find('{http://purl.uniprot.org/core/}scientificName')
+            info.append(scientific_name.text if scientific_name is not None else '')
+            rank_elem = elem.find('{http://purl.uniprot.org/core/}rank')
+            info.append(rank_elem.get('{http://www.w3.org/1999/02/22-rdf-syntax-ns#}resource').split('/')[-1]
+                        if rank_elem is not None else '')
+            upper_taxon = elem.find('{http://www.w3.org/2000/01/rdf-schema#}subClassOf')
+            info.append(upper_taxon.get('{http://www.w3.org/1999/02/22-rdf-syntax-ns#}resource').split('/')[-1]
+                        if upper_taxon is not None else '')
+            written = f.write('\t'.join(info) + '\n')
+
+
 def download_resources(directory):
     for location in [
         # Download CDD
@@ -159,6 +184,8 @@ def download_resources(directory):
     os.chdir(directory)
     run_pipe_command(f'{tool} -xzf cdd.tar.gz --wildcards "*.smp"')
     os.chdir(wd)
+
+    get_tabular_taxonomy(f'{directory}/taxonomy.tsv')
 
 
 def str2bool(v):
