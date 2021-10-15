@@ -413,28 +413,38 @@ def count_on_file(expression, file, compressed=False):
     return int(check_output(f"{'zgrep' if compressed else 'grep'} -c '{expression}' {file}", shell=True))
 
 
-def split_fasta_by_taxid(file, tax_file, tax_col, output):
-    for tfile in [f'{output}/{taxid}.fasta' for taxid in set(tax_file[tax_col].tolist())]:
-        if os.path.isfile(tfile):
-            os.remove(tfile)
-    fasta = parse_fasta(file)
-    record = next(fasta, None)
-    i = 1
-    number_of_proteins = count_on_file('>', file)
-    tax_file = tax_file.sort_values(by=tax_col).reset_index()
-    print(tax_file[tax_col])
-    while record is not None:
-        if record.id in tax_file.index:
-            with open(f'{output}/{tax_file.iloc[tax_file[tax_col].searchsorted(value=record.id)][tax_col]}.fasta',
-                      'a') as f:
-                f.write(f'>{record.id}\n{str(record.seq)}\n')
-        else:
-            with open(f'{output}/0.fasta', 'a') as f:
-                f.write(f'>{record.id}\n{str(record.seq)}\n')
-        record = next(fasta, None)
-        if i % 1000 == 0 or i == number_of_proteins:
-            print(f'[{i}/{number_of_proteins}] proteins separated by taxon')
-        i += 1
+def parse_fasta_on_memory(file):
+    print(f'Parsing {file}')
+    lines = [line.rstrip('\n') for line in open(file)]
+    i = 0
+    result = dict()
+    while i < len(lines):
+        if lines[i].startswith('>'):
+            name = lines[i][1:].split()[0]
+            result[name] = ''
+            i += 1
+            while i < len(lines) and not lines[i].startswith('>'):
+                result[name] += lines[i]
+                i += 1
+    return pd.DataFrame.from_dict(result, orient='index', columns=['sequence'])
+
+
+def write_fasta(data, output, protein_id_col):
+    data[protein_id_col] = data[protein_id_col].apply(lambda x: f'>{x}')
+    data.to_csv(output, sep='\n', header=False, index=False)
+
+
+def split_fasta_by_taxid(file, tax_file, protein_id_col, tax_col, output):
+    tax_file.reset_index(inplace=True)
+    fastas = parse_fasta_on_memory(file)
+    fastas = pd.merge(fastas, tax_file[[protein_id_col, tax_col]], left_index=True, right_on=protein_id_col, how='left')
+    cols = fastas.columns.tolist()
+    cols.remove(protein_id_col)
+    fastas = fastas.groupby(protein_id_col)[cols].first()
+    for taxid in tqdm(set(tax_file[tax_col].tolist()), desc=f'Splitting sequences by taxon'):
+        write_fasta(
+            fastas[fastas[tax_col] == taxid].reset_index()[[protein_id_col, 'sequence']],
+            f'{output}/tmp/{taxid}.fasta', protein_id_col)
 
 
 def check_tax_databases(smp_directory, output, db_prefix, taxids, hmm_pgap):
@@ -465,6 +475,7 @@ def check_threads_database(smp_directory, db_prefix, threads):
 
 
 def load_relational_tables(resources_directory):
+    timed_message('Loading relational tables')
     cddid = parse_cddid(f'{resources_directory}/cddid_all.tbl')
     cddid['CDD ID'] = cddid['CDD ID'].apply(lambda x: f'CDD:{x}')
     hmm_pgap = pd.read_csv(f'{resources_directory}/hmm_PGAP.tsv', sep='\t', usecols=[1, 10, 12, 14, 15])
@@ -475,9 +486,9 @@ def load_relational_tables(resources_directory):
     hmm_pgap['taxonomic_range'] = hmm_pgap['taxonomic_range'].fillna(0.0).apply(
         lambda x: str(int(x)) if type(x) == float else x)
     fun = pd.read_csv(f'{sys.path[0]}/fun.tsv', sep='\t')
-    taxonomy_df = pd.read_csv(f'{resources_directory}/taxonomy.tsv', sep='\t', index_col='taxid')
-    taxonomy_df['parent_taxid'] = taxonomy_df['parent_taxid'].fillna(0.0).apply(
-        lambda x: str(int(x)) if type(x) == float else x)
+    taxonomy_df = pd.read_csv(f'{resources_directory}/taxonomy.tsv', sep='\t', index_col='taxid',
+                              dtype={'taxid': str, 'name': str, 'rank': str, 'parent_taxid': str})
+    taxonomy_df['parent_taxid'] = taxonomy_df['parent_taxid'].fillna('0')
     return cddid, hmm_pgap, fun, taxonomy_df
 
 
@@ -678,7 +689,7 @@ def main():
     else:
         if hasattr(args, "tax_file"):
             tax_file, main_taxids = taxids_of_interest(args.tax_file, args.protein_id_col, args.tax_col)
-            split_fasta_by_taxid(args.file, tax_file, args.tax_col, args.output)
+            split_fasta_by_taxid(args.file, tax_file, args.protein_id_col, args.tax_col, args.output)
         databases_prefixes = {
             'CDD': 'cd', 'Pfam': 'pfam', 'NCBIfam': 'NF', 'Protein_Clusters': 'PRK', 'Smart': 'smart',
             'TIGRFAM': 'TIGR', 'COG': 'COG', 'KOG': 'KOG'}
