@@ -23,7 +23,7 @@ from Bio import Entrez, SeqIO
 from requests import get as requests_get
 import xml.etree.ElementTree as ET
 
-__version__ = '1.5.1'
+__version__ = '1.5.2'
 
 Entrez.email = "A.N.Other@example.com"
 
@@ -292,6 +292,8 @@ def get_upper_taxids(taxid, tax_df):
     :param tax_df: pd.DataFrame - of read taxonomy.tsv (from taxonomy.rdf)
     :returns list - of upper taxIDs
     """
+    if taxid == '0':
+        return list
     taxids = list()
     while taxid != '1' and taxid != 'Taxon':
         taxids.append(taxid)
@@ -419,9 +421,12 @@ def split_fasta_by_taxid(file, tax_file, tax_col, output):
     record = next(fasta, None)
     i = 1
     number_of_proteins = count_on_file('>', file)
+    tax_file = tax_file.sort_values(by=tax_col).reset_index()
+    print(tax_file[tax_col])
     while record is not None:
         if record.id in tax_file.index:
-            with open(f'{output}/{tax_file.loc[record.id][tax_col]}.fasta', 'a') as f:
+            with open(f'{output}/{tax_file.iloc[tax_file[tax_col].searchsorted(value=record.id)][tax_col]}.fasta',
+                      'a') as f:
                 f.write(f'>{record.id}\n{str(record.seq)}\n')
         else:
             with open(f'{output}/0.fasta', 'a') as f:
@@ -482,7 +487,7 @@ def replace_spaces_with_commas(file):
 
 
 def taxids_of_interest(tax_file, protein_id_col, tax_col):
-    tax_file = pd.read_csv(tax_file, sep='\t', index_col=protein_id_col)
+    tax_file = pd.read_csv(tax_file, sep='\t', index_col=protein_id_col, low_memory=False)
     tax_file[tax_col] = tax_file[tax_col].fillna(0.0).astype(int).astype(str)
     return tax_file, set(tax_file[tax_col].tolist())
 
