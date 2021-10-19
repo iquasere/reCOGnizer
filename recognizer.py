@@ -579,6 +579,8 @@ def run_blast_formatter(archive, output, outfmt='6'):
 
 
 def get_post_processing(asn_report, resources_directory, evalue):
+    if not os.path.isfile(asn_report):
+        return pd.DataFrame(columns=['qseqid', 'sseqid', 'SUPERFAMILIES', 'SITES', 'MOTIFS'])
     run_rpsbproc(asn_report, resources_directory, evalue)
     rpsbproc_report = parse_rpsbproc(asn_report.replace(".asn", ".better"))
     if len(rpsbproc_report) > 0:
@@ -660,9 +662,10 @@ def taxonomic_db_workflow(
 
     db_report = pd.DataFrame(columns=['qseqid', 'sseqid', 'SUPERFAMILIES', 'SITES', 'MOTIFS'])
     for taxid in lineages.keys():
-        report_6 = get_post_processing(f'{output}/{base}_{taxid}_aligned.asn', resources_directory, evalue)
-        blast = parse_blast(f'{output}/{base}_{taxid}_aligned.blast')
-        db_report = db_report.append(pd.merge(report_6, blast, on=['qseqid', 'sseqid'], how='left'))
+        if os.path.isfile(f'{output}/{base}_{taxid}_aligned.blast'):
+            blast = parse_blast(f'{output}/{base}_{taxid}_aligned.blast')
+            report_6 = get_post_processing(f'{output}/{base}_{taxid}_aligned.asn', resources_directory, evalue)
+            db_report = db_report.append(pd.merge(report_6, blast, on=['qseqid', 'sseqid'], how='left'))
     db_report.to_csv(f'{output}/{base}_report.tsv', sep='\t')
 
 
