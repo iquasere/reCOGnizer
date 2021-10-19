@@ -17,7 +17,7 @@ import sys
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool, cpu_count, Manager
 from time import time, gmtime, strftime
 from Bio import Entrez, SeqIO
 from requests import get as requests_get
@@ -131,7 +131,7 @@ def get_tabular_taxonomy(output):
     root = ET.parse('taxonomy.rdf').getroot()
     elems = root.findall('{http://www.w3.org/1999/02/22-rdf-syntax-ns#}Description')
     with open(output, 'w') as f:
-        written = f.write('\t'.join(['taxid','name','rank','parent_taxid']) + '\n')
+        written = f.write('\t'.join(['taxid','name','rank','parent_taxid']) + '\n')     # assignment to "written" stops output to console
         for elem in tqdm(elems, desc='Converting XML taxonomy.rdf to TSV format'):
             info = [elem.get('{http://www.w3.org/1999/02/22-rdf-syntax-ns#}about').split('/')[-1]]
             scientific_name = elem.find('{http://purl.uniprot.org/core/}scientificName')
@@ -210,7 +210,7 @@ def run_rpsblast(query, output, reference, threads='0', max_target_seqs=1, evalu
 def parse_cddid(cddid):
     cddid = pd.read_csv(cddid, sep='\t', header=None)[[0, 1, 3]]
     cddid.columns = ['CDD ID', 'DB ID', 'DB description']
-    #cddid['CDD ID'] = [f'CDD:{ide}' for ide in cddid['CDD ID']]
+    #cddid['CDD ID'] = [f'CDD:{ide}' for ide in cddid['CDD ID']]    # for now, seems to no longer be required
     return cddid
 
 
@@ -302,14 +302,25 @@ def get_upper_taxids(taxid, tax_df):
 
 
 def get_lineages(taxids, taxonomy_df):
-    import json
-    lineages = dict()
-    all_taxids = list()
+    lineages = {}
+    all_taxids = []
     for taxid in tqdm(taxids, desc=f'Listing all parent tax IDs for {len(taxids)} tax IDs'):
         lineage = get_upper_taxids(taxid, taxonomy_df)
         lineages[taxid] = lineage
         all_taxids += lineage
     return lineages, all_taxids
+
+
+def get_lineages_multiprocessing(taxids, taxonomy_df, threads=14):
+    taxids_groups = split(list(taxids), threads)
+    lineages, res_taxids = ({}, [])
+    with Manager() as m:
+        with m.Pool() as p:
+            result = p.starmap(get_lineages, [(taxids_group, taxonomy_df) for taxids_group in taxids_groups])
+    for res in result:
+        lineages = {**lineages, **res[0]}
+        res_taxids += res[1]
+    return lineages, res_taxids
 
 
 def create_tax_db(smp_directory, output, db_prefix, taxids, hmm_pgap):
@@ -376,7 +387,7 @@ def cog2ko(cogblast, cog2ko_ssv=f'{sys.path[0]}/resources_directory/cog2ko.ssv')
             join - {0}/string2ko.tsv""".format(directory), file=f'{directory}/cog2ko.ssv')
         df = pd.read_csv(f'{directory}/cog2ko.ssv', sep=' ', names=['StringDB', 'COG', 'KO'])
         df[['COG', 'KO']].groupby('COG')['KO'].agg([('KO', ','.join)]).reset_index().to_csv(
-            'f{directory}/cog2ko.tsv', sep='\t', index=False, header=['cog', 'KO'])
+            f'{directory}/cog2ko.tsv', sep='\t', index=False, header=['cog', 'KO'])
     return pd.merge(cogblast, pd.read_csv(cog2ko_ssv, sep='\t'), on='cog', how='left')
 
 
@@ -507,7 +518,7 @@ def replace_spaces_with_commas(file):
 def taxids_of_interest(tax_file, protein_id_col, tax_col, tax_df):
     tax_file = pd.read_csv(tax_file, sep='\t', index_col=protein_id_col, low_memory=False)
     tax_file[tax_col] = tax_file[tax_col].fillna(0.0).astype(int).astype(str)
-    lineages, all_taxids = get_lineages(set(tax_file[tax_col].tolist()), tax_df)
+    lineages, all_taxids = get_lineages_multiprocessing(set(tax_file[tax_col].tolist()), tax_df)
     return tax_file, lineages, all_taxids
 
 
@@ -645,16 +656,19 @@ def taxonomic_db_workflow(
         max_target_seqs=1, evalue=1e-5):
     all_taxids += ['131567', '0']  # cellular organisms and no taxonomy
     hmm_pgap_taxids = get_hmm_pgap_taxids(all_taxids, databases_prefixes[base], hmm_pgap)
+
     taxids_with_db = check_tax_databases(
         resources_directory, resources_directory, databases_prefixes[base], hmm_pgap_taxids, hmm_pgap)
     dbs = {taxid: [
         f'{resources_directory}/{databases_prefixes[base]}_{parent_taxid}' for parent_taxid in
         lineages[taxid] + ['0'] if parent_taxid in taxids_with_db] for taxid in lineages.keys()}
 
+
     with Pool(processes=threads) as p:
         p.starmap(run_rpsblast, [(
             f'{output}/tmp/{taxid}.fasta', f'{output}/{base}_{taxid}_aligned.asn', ' '.join(dbs[taxid]), '1',
             max_target_seqs, evalue) for taxid in lineages.keys()])
+
 
     with Pool(processes=threads) as p:
         p.starmap(run_blast_formatter, [(
@@ -663,9 +677,9 @@ def taxonomic_db_workflow(
     db_report = pd.DataFrame(columns=['qseqid', 'sseqid', 'SUPERFAMILIES', 'SITES', 'MOTIFS'])
     for taxid in lineages.keys():
         if os.path.isfile(f'{output}/{base}_{taxid}_aligned.blast'):
-            blast = parse_blast(f'{output}/{base}_{taxid}_aligned.blast')
-            report_6 = get_post_processing(f'{output}/{base}_{taxid}_aligned.asn', resources_directory, evalue)
-            db_report = db_report.append(pd.merge(report_6, blast, on=['qseqid', 'sseqid'], how='left'))
+            rpsbproc_report = get_post_processing(f'{output}/{base}_{taxid}_aligned.asn', resources_directory, evalue)
+            if len(rpsbproc_report) > 0:
+                db_report = db_report.append(rpsbproc_report)
     db_report.to_csv(f'{output}/{base}_report.tsv', sep='\t')
 
 
@@ -700,7 +714,7 @@ def main():
         if hasattr(args, "tax_file"):
             tax_file, lineages, all_taxids = taxids_of_interest(
                 args.tax_file, args.protein_id_col, args.tax_col, taxonomy_df)
-            #split_fasta_by_taxid(args.file, tax_file, args.protein_id_col, args.tax_col, args.output)
+            split_fasta_by_taxid(args.file, tax_file, args.protein_id_col, args.tax_col, args.output)
         databases_prefixes = {
             'CDD': 'cd', 'Pfam': 'pfam', 'NCBIfam': 'NF', 'Protein_Clusters': 'PRK', 'Smart': 'smart',
             'TIGRFAM': 'TIGR', 'COG': 'COG', 'KOG': 'KOG'}
