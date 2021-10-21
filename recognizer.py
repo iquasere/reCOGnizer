@@ -23,7 +23,7 @@ from Bio import Entrez, SeqIO
 from requests import get as requests_get
 import xml.etree.ElementTree as ET
 
-__version__ = '1.5.2'
+__version__ = '1.5.3'
 
 Entrez.email = "A.N.Other@example.com"
 
@@ -37,25 +37,25 @@ def get_arguments():
     parser.add_argument("--evalue", type=float, default=1e-2, help="Maximum e-value to report annotations for [1e-2]")
     parser.add_argument("--pident", type=float, default=0, help="Minimum pident to report annotations for [0]")
     parser.add_argument(
-        "-o", "--output", type=str, help="Output directory [reCOGnizer_results]", default='reCOGnizer_results')
+        "-o", "--output", help="Output directory [reCOGnizer_results]", default='reCOGnizer_results')
     parser.add_argument(
         "-dr", "--download-resources", default=False, action="store_true",
         help='If resources for reCOGnizer are not available at "resources_directory" [false]')
     parser.add_argument(
-        "-rd", "--resources-directory", type=str, default=os.path.expanduser('~/recognizer_resources'),
+        "-rd", "--resources-directory", default=os.path.expanduser('~/recognizer_resources'),
         help="Output directory for storing databases and other resources [~/recognizer_resources]")
     parser.add_argument(
-        "-dbs", "--databases", type=str, nargs='+',
+        "-dbs", "--databases", nargs='+',
         choices=["CDD", "Pfam", "NCBIfam", "Protein_Clusters", "Smart", "TIGRFAM", "COG", "KOG"],
         default=["CDD", "Pfam", "NCBIfam", "Protein_Clusters", "Smart", "TIGRFAM", "COG", "KOG"],
         help="Databases to include in functional annotation [all available]")
     parser.add_argument(
-        "-db", "--database", type=str,
+        "-db", "--database",
         help="Basename of database for annotation. If multiple databases, use comma separated list (db1,db2,db3)")
     parser.add_argument(
         "--custom-database", action="store_true", default=False, help="If database was NOT produced by reCOGnizer")
     parser.add_argument(
-        "-mts", "--max-target-seqs", default=1, help="Number of maximum identifications for each protein [1]")
+        "-mts", "--max-target-seqs", type=int, default=1, help="Number of maximum identifications for each protein [1]")
     parser.add_argument(
         "--remove-spaces", action="store_true", default=False,
         help="BLAST ignores sequences IDs after the first space. "
@@ -70,7 +70,7 @@ def get_arguments():
 
     requiredNamed = parser.add_argument_group('required named arguments')
     requiredNamed.add_argument(
-        "-f", "--file", type=str, required=True, help="Fasta file with protein sequences for annotation")
+        "-f", "--file", required=True, help="Fasta file with protein sequences for annotation")
 
     taxArguments = parser.add_argument_group('taxonomy arguments')
     taxArguments.add_argument(
@@ -88,7 +88,8 @@ def get_arguments():
     args.output = args.output.rstrip('/')
     args.resources_directory = args.resources_directory.rstrip('/')
 
-    for directory in [args.output, args.resources_directory]:
+    for directory in [f'{args.output}/{folder}' for folder in ['fasta', 'asn', 'blast', 'rpsbproc']] + [
+        args.resources_directory]:
         if not os.path.isdir(directory):
             Path(directory).mkdir(parents=True, exist_ok=True)
             print(f'Created {directory}')
@@ -512,7 +513,7 @@ def load_relational_tables(resources_directory):
 
 def replace_spaces_with_commas(file):
     timed_message('Replacing spaces for commas')
-    run_pipe_command(f"sed -i -e 's/ /_/g' {file}")
+    run_pipe_command(f"sed -i -e 's/ /_/g' {file}", print_message=False)
 
 
 def taxids_of_interest(tax_file, protein_id_col, tax_col, tax_df):
@@ -530,19 +531,14 @@ def get_hmm_pgap_taxids(all_taxids, db_prefix, hmm_pgap):
 
 
 def add_sequences(file, report):
-    fasta = parse_fasta(file)
-    report['Sequence'] = pd.Series(dtype=str)
-    report.set_index('qseqid', inplace=True)
-    for entry in fasta:
-        report.at[entry.id, 'Sequence'] = str(entry.seq)
-    report.reset_index(inplace=True)
-    return report
+    fasta = parse_fasta_on_memory(file)
+    return pd.merge(report, fasta, left_on='qseqid', right_index=True, how='left')
 
 
 def run_rpsbproc(asn_report, resources_directory, evalue):
     run_pipe_command(
         f'rpsbproc -i {asn_report} -o {asn_report.replace(".asn", ".better")} -d {resources_directory} -e {evalue} '
-        f'-m rep -f -t both 2>verbose.log')
+        f'-m rep -f -t both 2>verbose.log', print_message=False)
 
 
 def parse_rpsbproc_section(handler, line, section_name, i):
@@ -586,14 +582,15 @@ def parse_rpsbproc(file):
 
 
 def run_blast_formatter(archive, output, outfmt='6'):
-    run_pipe_command(f'blast_formatter -archive {archive} -outfmt {outfmt} -out {output} 2>verbose.log')
+    run_pipe_command(
+        f'blast_formatter -archive {archive} -outfmt {outfmt} -out {output} 2>verbose.log', print_message=False)
 
 
 def get_post_processing(asn_report, resources_directory, evalue):
     if not os.path.isfile(asn_report):
         return pd.DataFrame(columns=['qseqid', 'sseqid', 'SUPERFAMILIES', 'SITES', 'MOTIFS'])
     run_rpsbproc(asn_report, resources_directory, evalue)
-    rpsbproc_report = parse_rpsbproc(asn_report.replace(".asn", ".better"))
+    rpsbproc_report = parse_rpsbproc(asn_report.replace("asn", "rpsbproc"))
     if len(rpsbproc_report) > 0:
         for col in rpsbproc_report.columns.tolist()[2:]:    # exclude 'qseqid' and 'sseqid'
             rpsbproc_report[col] = rpsbproc_report[col].apply(','.join)
@@ -663,21 +660,25 @@ def taxonomic_db_workflow(
         f'{resources_directory}/{databases_prefixes[base]}_{parent_taxid}' for parent_taxid in
         lineages[taxid] + ['0'] if parent_taxid in taxids_with_db] for taxid in lineages.keys()}
 
-
+    timed_message('Running RPS-Blast')
     with Pool(processes=threads) as p:
         p.starmap(run_rpsblast, [(
-            f'{output}/tmp/{taxid}.fasta', f'{output}/{base}_{taxid}_aligned.asn', ' '.join(dbs[taxid]), '1',
-            max_target_seqs, evalue) for taxid in lineages.keys()])
+            f'{output}/tmp/{taxid}.fasta', f'{output}/asn/{base}_{taxid}_aligned.asn', ' '.join(dbs[taxid]), '1',
+            max_target_seqs, evalue) for taxid in lineages.keys() if os.path.isfile(f'{output}/tmp/{taxid}.fasta')])
 
-
+    timed_message('Converting ASM outfmt 11 to TAB outfmt 6')
     with Pool(processes=threads) as p:
         p.starmap(run_blast_formatter, [(
-            f'{output}/{base}_{taxid}_aligned.asn', f'{output}/{base}_{taxid}_aligned.blast') for taxid in lineages.keys()])
+            f'{output}/asn/{base}_{taxid}_aligned.asn',
+            f'{output}/blast/{base}_{taxid}_aligned.blast') for taxid in lineages.keys()
+            if os.path.isfile(f'{output}/asn/{base}_{taxid}_aligned.asn')])
 
+    timed_message('Retrieving information to DB report')
     db_report = pd.DataFrame(columns=['qseqid', 'sseqid', 'SUPERFAMILIES', 'SITES', 'MOTIFS'])
     for taxid in lineages.keys():
-        if os.path.isfile(f'{output}/{base}_{taxid}_aligned.blast'):
-            rpsbproc_report = get_post_processing(f'{output}/{base}_{taxid}_aligned.asn', resources_directory, evalue)
+        if os.path.isfile(f'{output}/blast/{base}_{taxid}_aligned.blast'):
+            rpsbproc_report = get_post_processing(
+                f'{output}/asn/{base}_{taxid}_aligned.asn', resources_directory, evalue)
             if len(rpsbproc_report) > 0:
                 db_report = db_report.append(rpsbproc_report)
     db_report.to_csv(f'{output}/{base}_report.tsv', sep='\t')
@@ -691,9 +692,30 @@ def multithreaded_db_workflow(
         ' '.join([f'{resources_directory}/{databases_prefixes[base]}_{threads}_{i}' for i in range(threads)]),
         threads=threads, max_target_seqs=max_target_seqs, evalue=evalue)
     run_blast_formatter(f'{output}/{base}_aligned.asn', f'{output}/{base}_aligned.blast')
-    report_6 = get_post_processing(f'{output}/{base}_aligned.asn', resources_directory, evalue)
-    pd.merge(report_6, parse_blast(f'{output}/{base}_aligned.blast'), on=['qseqid', 'sseqid'], how='left').to_csv(
-        f'{output}/{base}_report.tsv', sep='\t')
+    db_report = get_post_processing(f'{output}/{base}_aligned.asn', resources_directory, evalue)
+    db_report.to_csv(f'{output}/{base}_report.tsv', sep='\t')
+
+
+def organize_results(
+        file, output, resources_directory, databases, hmm_pgap, cddid, fun, pident=0, no_output_sequences=False):
+    timed_message("Organizing annotation results")
+    i = 1
+    xlsx_report = pd.ExcelWriter(f'{output}/reCOGnizer_results.xlsx', engine='xlsxwriter')
+    all_reports = pd.DataFrame()
+    for db in databases:
+        print(f'[{i}/{len(databases)}] Handling {db} annotation')
+        report = pd.read_csv(f'{output}/{db}_report.tsv', sep='\t', index_col=0)
+        report = pd.merge(report, cddid, left_on='sseqid', right_on='CDD ID', how='left')
+        del report['CDD ID']
+        if not no_output_sequences:
+            report = add_sequences(file, report)  # adding protein sequences if requested
+        report = add_db_info(report, db, resources_directory, output, hmm_pgap, fun)
+        #report = report[report['pident'] > pident]  # filter matches by pident - seems no longer implementable after rpsbproc integration
+        all_reports = pd.concat([all_reports, report])
+        multi_sheet_excel(xlsx_report, report, sheet_name=db)
+        i += 1
+    all_reports.sort_values(by=['qseqid', 'DB ID']).to_csv(f'{output}/reCOGnizer_results.tsv', sep='\t', index=False)
+    xlsx_report.save()
 
 
 def main():
@@ -731,28 +753,12 @@ def main():
                     args.file, args.output, args.resources_directory, args.threads, databases_prefixes, base,
                     max_target_seqs=args.max_target_seqs, evalue=args.evalue)
 
-        timed_message("Organizing annotation results")
-        i = 1
-        xlsx_report = pd.ExcelWriter(f'{args.output}/reCOGnizer_results.xlsx', engine='xlsxwriter')
-        all_reports = pd.DataFrame()
-        for db in args.databases:
-            print(f'[{i}/{len(args.databases)}] Handling {db} annotation')
-            report = pd.read_csv(f'{args.output}/{db}_report.tsv', sep='\t', index_col=0)
-            report = pd.merge(report, cddid, left_on='sseqid', right_on='CDD ID', how='left')
-            del report['CDD ID']
-            if not args.no_output_sequences:
-                report = add_sequences(args.file, report)       # adding protein sequences if requested
-            report = add_db_info(report, db, args.resources_directory, args.output, hmm_pgap, fun)
-            report = report[report['pident'] > args.pident]     # filter matches by pident
-            all_reports = pd.concat([all_reports, report])
-            multi_sheet_excel(xlsx_report, report, sheet_name=db)
-            i += 1
-        all_reports.sort_values(by=['qseqid', 'DB ID']).to_csv(
-            f'{args.output}/reCOGnizer_results.tsv', sep='\t', index=False)
-        xlsx_report.save()
+        organize_results(
+            args.file, args.output, args.resources_directory, args.databases, hmm_pgap, cddid, fun, pident=args.pident,
+            no_output_sequences=args.no_output_sequences)
 
 
 if __name__ == '__main__':
     start_time = time()
     main()
-    print(f'reCOGnizer analysis finished in {strftime("%Hh%Mm%Ss", gmtime(time() - start_time))}')
+    timed_message(f'reCOGnizer analysis finished in {strftime("%Hh%Mm%Ss", gmtime(time() - start_time))}')
