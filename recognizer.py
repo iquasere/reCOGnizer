@@ -132,7 +132,8 @@ def get_tabular_taxonomy(output):
     root = ET.parse('taxonomy.rdf').getroot()
     elems = root.findall('{http://www.w3.org/1999/02/22-rdf-syntax-ns#}Description')
     with open(output, 'w') as f:
-        written = f.write('\t'.join(['taxid','name','rank','parent_taxid']) + '\n')     # assignment to "written" stops output to console
+        written = f.write('\t'.join(
+            ['taxid', 'name', 'rank', 'parent_taxid']) + '\n')  # assignment to "written" stops output to console
         for elem in tqdm(elems, desc='Converting XML taxonomy.rdf to TSV format'):
             info = [elem.get('{http://www.w3.org/1999/02/22-rdf-syntax-ns#}about').split('/')[-1]]
             scientific_name = elem.find('{http://purl.uniprot.org/core/}scientificName')
@@ -151,7 +152,7 @@ def download_resources(directory):
         # Download CDD
         'ftp://ftp.ncbi.nih.gov/pub/mmdb/cdd/cdd.tar.gz',
         'https://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/cddid_all.tbl.gz',
-        'https://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/cdd.info',   # only for versions
+        'https://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/cdd.info',  # only for versions
         # COG categories
         'ftp.ncbi.nlm.nih.gov/pub/COG/COG2020/data/fun-20.tab',
         'ftp.ncbi.nlm.nih.gov/pub/COG/COG2020/data/cog-20.def.tab',
@@ -211,7 +212,7 @@ def run_rpsblast(query, output, reference, threads='0', max_target_seqs=1, evalu
 def parse_cddid(cddid):
     cddid = pd.read_csv(cddid, sep='\t', header=None)[[0, 1, 3]]
     cddid.columns = ['CDD ID', 'DB ID', 'DB description']
-    #cddid['CDD ID'] = [f'CDD:{ide}' for ide in cddid['CDD ID']]    # for now, seems to no longer be required
+    # cddid['CDD ID'] = [f'CDD:{ide}' for ide in cddid['CDD ID']]    # for now, seems to no longer be required
     return cddid
 
 
@@ -399,20 +400,21 @@ def write_table(table, output, out_format='excel', header=True):
         table.to_csv(f'{output}.tsv', index=False, sep='\t', header=header)
 
 
-def multi_sheet_excel(writer, data, sheet_name='Sheet', lines=1000000, index=False):
-    if len(data) < lines:
+def multi_sheet_excel(writer, data, sheet_name='Sheet', max_lines=1000000, index=False):
+    if len(data) < max_lines:
         data.to_excel(writer, sheet_name=sheet_name, index=index)
     else:
-        for i in range(0, len(data), lines):
-            j = min(i + lines, len(data))
-            data.iloc[i:(i + lines)].to_excel(writer, sheet_name=f'{sheet_name} ({j})', index=index)
+        j = 1
+        for i in range(0, len(data), max_lines):
+            data.iloc[i:(i + max_lines)].to_excel(writer, sheet_name=f'{sheet_name} ({j})', index=index)
+            j += 1
     return writer
 
 
-def create_krona_plot(tsv, output=None):
+def create_krona_plot(tsv, output=None, print_command=False):
     if output is None:
         output = tsv.replace('.tsv', '.html')
-    run_command(f'ktImportText {tsv} -o {output}')
+    run_command(f'ktImportText {tsv} -o {output}', print_command=print_command)
 
 
 def write_cog_categories(data, output_basename):
@@ -430,7 +432,6 @@ def count_on_file(expression, file, compressed=False):
 
 
 def parse_fasta_on_memory(file):
-    print(f'Parsing {file}')
     lines = [line.rstrip('\n') for line in open(file)]
     i = 0
     result = dict()
@@ -556,7 +557,7 @@ def parse_rpsbproc(file):
     file = open(file)
     line = [next(file) for i in range(3)][-1]
     result = pd.DataFrame(columns=['DOMAINS', 'SUPERFAMILIES', 'SITES', 'MOTIFS'])
-    while line.startswith('#'):     # skip first section
+    while line.startswith('#'):  # skip first section
         line = next(file)
     line = next(file, None)
     if line is None:
@@ -592,7 +593,7 @@ def get_post_processing(asn_report, resources_directory, evalue):
     run_rpsbproc(asn_report, resources_directory, evalue)
     rpsbproc_report = parse_rpsbproc(asn_report.replace("asn", "rpsbproc"))
     if len(rpsbproc_report) > 0:
-        for col in rpsbproc_report.columns.tolist()[2:]:    # exclude 'qseqid' and 'sseqid'
+        for col in rpsbproc_report.columns.tolist()[2:]:  # exclude 'qseqid' and 'sseqid'
             rpsbproc_report[col] = rpsbproc_report[col].apply(','.join)
         rpsbproc_report = expand_by_list_column(rpsbproc_report, column='sseqid')
         rpsbproc_report.index = rpsbproc_report.index.astype(str)
@@ -710,7 +711,7 @@ def organize_results(
         if not no_output_sequences:
             report = add_sequences(file, report)  # adding protein sequences if requested
         report = add_db_info(report, db, resources_directory, output, hmm_pgap, fun)
-        #report = report[report['pident'] > pident]  # filter matches by pident - seems no longer implementable after rpsbproc integration
+        # report = report[report['pident'] > pident]  # filter matches by pident - seems no longer implementable after rpsbproc integration
         all_reports = pd.concat([all_reports, report])
         multi_sheet_excel(xlsx_report, report, sheet_name=db)
         i += 1
@@ -729,7 +730,7 @@ def main():
     if args.remove_spaces:
         replace_spaces_with_commas(args.file)
 
-    if args.database:  # if database was inputted
+    if args.database:  # if user database was inputted
         custom_database_workflow(
             args.file, args.output, args.threads, args.max_target_seqs, args.evalue, database=args.database)
     else:
