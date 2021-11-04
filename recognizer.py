@@ -23,7 +23,7 @@ from Bio import Entrez, SeqIO
 from requests import get as requests_get
 import xml.etree.ElementTree as ET
 
-__version__ = '1.5.3'
+__version__ = '1.6.0'
 
 Entrez.email = "A.N.Other@example.com"
 
@@ -35,7 +35,8 @@ def get_arguments():
     parser.add_argument("-t", "--threads", type=int, default=cpu_count() - 2,
                         help="Number of threads for reCOGnizer to use [max available - 2]")
     parser.add_argument("--evalue", type=float, default=1e-2, help="Maximum e-value to report annotations for [1e-2]")
-    parser.add_argument("--pident", type=float, default=0, help="Minimum pident to report annotations for [0]")
+    parser.add_argument(
+        "--pident", type=float, default=0.0, help="[DEPRECATED] Minimum pident to report annotations for [0]")
     parser.add_argument(
         "-o", "--output", help="Output directory [reCOGnizer_results]", default='reCOGnizer_results')
     parser.add_argument(
@@ -57,7 +58,7 @@ def get_arguments():
     parser.add_argument(
         "-mts", "--max-target-seqs", type=int, default=1, help="Number of maximum identifications for each protein [1]")
     parser.add_argument(
-        "--remove-spaces", action="store_true", default=False,
+        "--keep-spaces", action="store_true", default=False,
         help="BLAST ignores sequences IDs after the first space. "
              "This option changes all spaces to underscores to keep the full IDs.")
     parser.add_argument(
@@ -88,7 +89,7 @@ def get_arguments():
     args.output = args.output.rstrip('/')
     args.resources_directory = args.resources_directory.rstrip('/')
 
-    for directory in [f'{args.output}/{folder}' for folder in ['fasta', 'asn', 'blast', 'rpsbproc']] + [
+    for directory in [f'{args.output}/{folder}' for folder in ['fasta', 'asn', 'blast', 'rpsbproc', 'tmp']] + [
         args.resources_directory]:
         if not os.path.isdir(directory):
             Path(directory).mkdir(parents=True, exist_ok=True)
@@ -101,14 +102,14 @@ def timed_message(message):
     print(f'{strftime("%Y-%m-%d %H:%M:%S", gmtime())}: {message}')
 
 
-def run_command(bash_command, print_command=True, stdout=None, stderr=None):
+def run_command(bash_command, print_command=False, stdout=None, stderr=None):
     if print_command:
         print(bash_command)
     run(bash_command.split(), stdout=stdout, stderr=stderr)
 
 
-def run_pipe_command(bash_command, file='', mode='w', print_message=True):
-    if print_message:
+def run_pipe_command(bash_command, file='', mode='w', print_command=False):
+    if print_command:
         print(bash_command)
     if file == '':
         Popen(bash_command, stdin=PIPE, shell=True).communicate()
@@ -266,28 +267,6 @@ def split(a, n):
     return (a[i * k + min(i, m):(i + 1) * k + min(i + 1, m)] for i in range(n))
 
 
-def create_split_db(smp_directory, output, db_prefix, threads=12):
-    """
-    Input:
-        smp_directory: foldername where the SMP files are. These files are
-        obtained from ftp://ftp.ncbi.nih.gov/pub/mmdb/cdd/cdd.tar.gz
-        output: basename for PN and databases
-        threads: STR, number of threads that the workflow will use
-    Output:
-        threads - 1 databases will be outputed, each with a consecutive part of
-        the list of SMP files available. These databases are formated for RPS-BLAST
-        search
-    """
-    print(f'Generating databases for [{threads}] threads.')
-    smp_list = glob(f'{smp_directory}/{db_prefix}*.smp')
-    parts = list(split(smp_list, threads))
-    for i in range(len(parts)):
-        with open(f'{output}/{db_prefix}_{threads}_{i}.pn', 'w') as f:
-            f.write('\n'.join(parts[i]))
-    pool = Pool()
-    pool.map(pn2database, [f'{output}/{db_prefix}_{threads}_{i}.pn' for i in range(len(parts))])
-
-
 def get_upper_taxids(taxid, tax_df):
     """
     :param taxid: str - taxID to get upper taxIDs from
@@ -306,7 +285,7 @@ def get_upper_taxids(taxid, tax_df):
 def get_lineages(taxids, taxonomy_df):
     lineages = {}
     all_taxids = []
-    for taxid in tqdm(taxids, desc=f'Listing all parent tax IDs for {len(taxids)} tax IDs'):
+    for taxid in taxids:
         lineage = get_upper_taxids(taxid, taxonomy_df)
         lineages[taxid] = lineage
         all_taxids += lineage
@@ -314,6 +293,7 @@ def get_lineages(taxids, taxonomy_df):
 
 
 def get_lineages_multiprocessing(taxids, taxonomy_df, threads=14):
+    timed_message(f'Listing all parent tax IDs for {len(taxids)} tax IDs')
     taxids_groups = split(list(taxids), threads)
     lineages, res_taxids = ({}, [])
     with Manager() as m:
@@ -342,13 +322,8 @@ def create_tax_db(smp_directory, output, db_prefix, taxids, hmm_pgap):
             'source_identifier']]
         with open(f'{output}/{db_prefix}_{taxid}.pn', 'w') as f:
             f.write('\n'.join([f'{file}.smp' for file in set(smp_list)]))
-    '''
-    pool = Pool()
-    pool.map(pn2database, [f'{output}/{db_prefix}_{tax_id}.pn' for tax_id in taxids])
-    '''
     for taxid in taxids:
-        pn = f'{output}/{db_prefix}_{taxid}.pn'
-        run_command(f"makeprofiledb -in {pn} -title {pn.split('.pn')[0]} -out {pn.split('.pn')[0]}")
+        pn2database(f'{output}/{db_prefix}_{taxid}.pn')
         taxids_with_db.append(taxid)
     return taxids_with_db
 
@@ -468,8 +443,8 @@ def split_fasta_by_taxid(file, tax_file, protein_id_col, tax_col, output):
 
 
 def check_tax_databases(smp_directory, output, db_prefix, taxids, hmm_pgap):
-    taxids_lacking_db = list()
-    taxids_with_db = list()
+    taxids_lacking_db = []
+    taxids_with_db = []
     for taxid in list(taxids):
         if not is_db_good(f'{smp_directory}/{db_prefix}_{taxid}'):
             taxids_lacking_db.append(taxid)
@@ -479,19 +454,16 @@ def check_tax_databases(smp_directory, output, db_prefix, taxids, hmm_pgap):
     return taxids_with_db + taxids_lacking_db
 
 
-def check_threads_database(smp_directory, db_prefix, threads):
-    dbs = [f'{smp_directory}/{db_prefix}_{threads}_{i}' for i in range(threads)]
-    i = 0
-    remake_db = False
-    while not remake_db and i < len(dbs):
-        if not is_db_good(dbs[i]):
-            print(f'Some part of {db_prefix} was not valid!')
-            remake_db = True
-        i += 1
+def check_regular_database(smp_directory, db_prefix):
+    remake_db = not is_db_good(f'{smp_directory}/{db_prefix}')
     if remake_db:
-        create_split_db(smp_directory, smp_directory, db_prefix, threads)
+        print(f'Some part of {db_prefix} was not valid! Will rebuild!')
+        smp_list = glob(f'{smp_directory}/{db_prefix}*.smp')
+        with open(f'{output}/{db_prefix}.pn', 'w') as f:
+            f.write('\n'.join(smp_list))
+        pn2database(f'{output}/{db_prefix}.pn')
     else:
-        print(f'A valid {db_prefix} split database for [{threads}] threads was found!')
+        print(f'A valid {db_prefix} split database was found!')
 
 
 def load_relational_tables(resources_directory):
@@ -512,9 +484,19 @@ def load_relational_tables(resources_directory):
     return cddid, hmm_pgap, fun, taxonomy_df
 
 
-def replace_spaces_with_commas(file):
+def replace_spaces_with_commas(file, tmp_dir):
     timed_message('Replacing spaces for commas')
-    run_pipe_command(f"sed -i -e 's/ /_/g' {file}", print_message=False)
+    run_pipe_command(f"sed -e 's/ /_/g' {file} > {tmp_dir}/tmp.fasta")
+    return f'{tmp_dir}/tmp.fasta'
+
+
+def split_fasta_by_threads(file, output_basename, threads):
+    fasta = parse_fasta_on_memory(file)
+    keys = list(split(fasta.index, threads))
+    for i in range(threads):
+        with open(f'{output_basename}_{i}.fasta', 'w') as f:
+            for key in keys[i]:
+                f.write(f'>{key}\n{fasta.loc[key, "sequence"]}\n')
 
 
 def taxids_of_interest(tax_file, protein_id_col, tax_col, tax_df):
@@ -538,8 +520,8 @@ def add_sequences(file, report):
 
 def run_rpsbproc(asn_report, resources_directory, evalue):
     run_pipe_command(
-        f'rpsbproc -i {asn_report} -o {asn_report.replace(".asn", ".better")} -d {resources_directory} -e {evalue} '
-        f'-m rep -f -t both 2>verbose.log', print_message=False)
+        f'rpsbproc -i {asn_report} -o {asn_report.replace(".asn", ".rpsbproc")} -d {resources_directory} -e {evalue} '
+        f'-m rep -f -t both 2>verbose.log')
 
 
 def parse_rpsbproc_section(handler, line, section_name, i):
@@ -583,15 +565,13 @@ def parse_rpsbproc(file):
 
 
 def run_blast_formatter(archive, output, outfmt='6'):
-    run_pipe_command(
-        f'blast_formatter -archive {archive} -outfmt {outfmt} -out {output} 2>verbose.log', print_message=False)
+    run_pipe_command(f'blast_formatter -archive {archive} -outfmt {outfmt} -out {output} 2>verbose.log')
 
 
-def get_post_processing(asn_report, resources_directory, evalue):
-    if not os.path.isfile(asn_report):
+def get_rpsbproc_info(rpsbproc_report):
+    if not os.path.isfile(rpsbproc_report):
         return pd.DataFrame(columns=['qseqid', 'sseqid', 'SUPERFAMILIES', 'SITES', 'MOTIFS'])
-    run_rpsbproc(asn_report, resources_directory, evalue)
-    rpsbproc_report = parse_rpsbproc(asn_report.replace("asn", "rpsbproc"))
+    rpsbproc_report = parse_rpsbproc(rpsbproc_report)
     if len(rpsbproc_report) > 0:
         for col in rpsbproc_report.columns.tolist()[2:]:  # exclude 'qseqid' and 'sseqid'
             rpsbproc_report[col] = rpsbproc_report[col].apply(','.join)
@@ -649,56 +629,80 @@ def custom_database_workflow(file, output, threads, max_target_seqs, evalue, dat
         file, f'{output}/aligned.blast', ' '.join(dbs), threads=threads, max_target_seqs=max_target_seqs, evalue=evalue)
 
 
-def taxonomic_db_workflow(
+def taxonomic_workflow(
         output, resources_directory, threads, lineages, all_taxids, databases_prefixes, base, hmm_pgap,
         max_target_seqs=1, evalue=1e-5):
     all_taxids += ['131567', '0']  # cellular organisms and no taxonomy
     hmm_pgap_taxids = get_hmm_pgap_taxids(all_taxids, databases_prefixes[base], hmm_pgap)
-
     taxids_with_db = check_tax_databases(
         resources_directory, resources_directory, databases_prefixes[base], hmm_pgap_taxids, hmm_pgap)
     dbs = {taxid: [
         f'{resources_directory}/{databases_prefixes[base]}_{parent_taxid}' for parent_taxid in
         lineages[taxid] + ['0'] if parent_taxid in taxids_with_db] for taxid in lineages.keys()}
 
-    timed_message('Running RPS-Blast')
+    db_report = pd.DataFrame(columns=['qseqid', 'sseqid', 'SUPERFAMILIES', 'SITES', 'MOTIFS'])
+    for taxid in tqdm(lineages.keys(), desc=timed_message('Running annotation')):
+        if os.path.isfile(f'{output}/tmp/{taxid}.fasta'):
+            # Run RPS-BLAST
+            with Pool(processes=threads) as p:
+                p.starmap(run_rpsblast, [(
+                    f'{output}/tmp/fasta_{taxid}_{i}.fasta', f'{output}/asn/{base}_{taxid}_{i}_aligned.asn',
+                    ' '.join(dbs[taxid]), '1', max_target_seqs, evalue) for i in range(threads)
+                    if os.path.isfile(f'{output}/tmp/fasta_{taxid}_{i}.fasta')])
+            # Convert ASN-11 to TAB-6
+            with Pool(processes=threads) as p:
+                p.starmap(run_blast_formatter, [(
+                    f'{output}/asn/{base}_{taxid}_{i}_aligned.asn',
+                    f'{output}/blast/{base}_{taxid}_{i}_aligned.blast') for i in range(threads)
+                    if os.path.isfile(f'{output}/asn/{base}_{taxid}_{i}_aligned.asn')])
+            # Convert ASN to RPSBPROC
+            with Pool(processes=threads) as p:
+                p.starmap(run_rpsbproc, [(
+                    f'{output}/asn/{base}_{taxid}_{i}_aligned.asn', resources_directory, evalue) for i in range(threads)
+                    if os.path.isfile(f'{output}/asn/{base}_{taxid}_{i}_aligned.asn')])
+            for i in range(threads):
+                if os.path.isfile(f'{output}/rpsbproc/{base}_{taxid}_{i}_aligned.rpsbproc'):
+                    rpsbproc_report = get_rpsbproc_info(f'{output}/rpsbproc/{base}_{taxid}_{i}_aligned.rpsbproc')
+                    if len(rpsbproc_report) > 0:
+                        db_report = db_report.append(rpsbproc_report)
+    db_report.to_csv(f'{output}/{base}_report.tsv', sep='\t')
+    run_pipe_command(f'cat {output}/blast/{base}_*_*_aligned.blast', output=f'{output}/blast/{base}_aligned.blast')
+    run_command(f'rm {output}/blast/{base}_*_*_aligned.blast')
+
+
+def multiprocess_workflow(
+        output, resources_directory, threads, databases_prefixes, base, max_target_seqs=5, evalue=0.01):
+    check_regular_database(resources_directory, databases_prefixes[base])
+    # Run RPS-BLAST
     with Pool(processes=threads) as p:
         p.starmap(run_rpsblast, [(
-            f'{output}/tmp/{taxid}.fasta', f'{output}/asn/{base}_{taxid}_aligned.asn', ' '.join(dbs[taxid]), '1',
-            max_target_seqs, evalue) for taxid in lineages.keys() if os.path.isfile(f'{output}/tmp/{taxid}.fasta')])
-
-    timed_message('Converting ASM outfmt 11 to TAB outfmt 6')
+            f'{output}/tmp/tmp_{i}.fasta', f'{output}/asn/{base}_{i}_aligned.asn',
+            f'{resources_directory}/{base}', '1', max_target_seqs, evalue) for i in range(threads)])
+    # Convert ASN-11 to TAB-6
     with Pool(processes=threads) as p:
         p.starmap(run_blast_formatter, [(
-            f'{output}/asn/{base}_{taxid}_aligned.asn',
-            f'{output}/blast/{base}_{taxid}_aligned.blast') for taxid in lineages.keys()
-            if os.path.isfile(f'{output}/asn/{base}_{taxid}_aligned.asn')])
-
-    timed_message('Retrieving information to DB report')
+            f'{output}/asn/{base}_{i}_aligned.asn',
+            f'{output}/blast/{base}_{i}_aligned.blast') for i in range(threads)
+            if os.path.isfile(f'{output}/asn/{base}_{i}_aligned.asn')])
+    run_pipe_command(f'cat {output}/blast/{base}_*_aligned.blast', output=f'{output}/blast/{base}_aligned.blast')
+    # Convert ASN to RPSBPROC
+    with Pool(processes=threads) as p:
+        p.starmap(run_rpsbproc, [(
+            f'{output}/asn/{base}_{i}_aligned.asn', resources_directory, evalue) for i in range(threads)
+            if os.path.isfile(f'{output}/asn/{base}_{i}_aligned.asn')])
     db_report = pd.DataFrame(columns=['qseqid', 'sseqid', 'SUPERFAMILIES', 'SITES', 'MOTIFS'])
-    for taxid in lineages.keys():
-        if os.path.isfile(f'{output}/blast/{base}_{taxid}_aligned.blast'):
-            rpsbproc_report = get_post_processing(
-                f'{output}/asn/{base}_{taxid}_aligned.asn', resources_directory, evalue)
+    for i in range(threads):
+        if os.path.isfile(f'{output}/rpsbproc/{base}_{i}_aligned.rpsbproc'):
+            rpsbproc_report = get_rpsbproc_info(f'{output}/rpsbproc/{base}_{i}_aligned.rpsbproc')
             if len(rpsbproc_report) > 0:
                 db_report = db_report.append(rpsbproc_report)
     db_report.to_csv(f'{output}/{base}_report.tsv', sep='\t')
-
-
-def multithreaded_db_workflow(
-        file, output, resources_directory, threads, databases_prefixes, base, max_target_seqs=5, evalue=0.01):
-    check_threads_database(resources_directory, databases_prefixes[base], threads)
-    run_rpsblast(
-        file, f'{output}/{base}_aligned.asn',
-        ' '.join([f'{resources_directory}/{databases_prefixes[base]}_{threads}_{i}' for i in range(threads)]),
-        threads=threads, max_target_seqs=max_target_seqs, evalue=evalue)
-    run_blast_formatter(f'{output}/{base}_aligned.asn', f'{output}/{base}_aligned.blast')
-    db_report = get_post_processing(f'{output}/{base}_aligned.asn', resources_directory, evalue)
-    db_report.to_csv(f'{output}/{base}_report.tsv', sep='\t')
+    run_pipe_command(f'cat {output}/blast/{base}_*_aligned.blast', output=f'{output}/blast/{base}_aligned.blast')
+    run_command(f'rm {output}/blast/{base}_*_aligned.blast')
 
 
 def organize_results(
-        file, output, resources_directory, databases, hmm_pgap, cddid, fun, pident=0, no_output_sequences=False):
+        file, output, resources_directory, databases, hmm_pgap, cddid, fun, no_output_sequences=False):
     timed_message("Organizing annotation results")
     i = 1
     xlsx_report = pd.ExcelWriter(f'{output}/reCOGnizer_results.xlsx', engine='xlsxwriter')
@@ -706,10 +710,12 @@ def organize_results(
     for db in databases:
         print(f'[{i}/{len(databases)}] Handling {db} annotation')
         report = pd.read_csv(f'{output}/{db}_report.tsv', sep='\t', index_col=0)
+        report = pd.merge(
+            report, parse_blast(f'{output}/blast/{db}_aligned.blast'), on=['qseqid', 'sseqid'], how='left')
         report = pd.merge(report, cddid, left_on='sseqid', right_on='CDD ID', how='left')
         del report['CDD ID']
         if not no_output_sequences:
-            report = add_sequences(file, report)  # adding protein sequences if requested
+            report = add_sequences(file, report)        # adding protein sequences if requested
         report = add_db_info(report, db, resources_directory, output, hmm_pgap, fun)
         # report = report[report['pident'] > pident]  # filter matches by pident - seems no longer implementable after rpsbproc integration
         all_reports = pd.concat([all_reports, report])
@@ -727,8 +733,8 @@ def main():
 
     cddid, hmm_pgap, fun, taxonomy_df = load_relational_tables(args.resources_directory)
 
-    if args.remove_spaces:
-        replace_spaces_with_commas(args.file)
+    if not args.keep_spaces:
+        args.file = replace_spaces_with_commas(args.file, f'{args.output}/tmp')     # if alters input file, internally alters args.file
 
     if args.database:  # if user database was inputted
         custom_database_workflow(
@@ -738,24 +744,30 @@ def main():
             tax_file, lineages, all_taxids = taxids_of_interest(
                 args.tax_file, args.protein_id_col, args.tax_col, taxonomy_df)
             split_fasta_by_taxid(args.file, tax_file, args.protein_id_col, args.tax_col, args.output)
+            # split FASTA for multiprocessing
+            for taxid in tqdm(lineages.keys(), desc=timed_message('Splitting FASTA')):
+                if os.path.isfile(f'{args.output}/tmp/{taxid}.fasta'):
+                    split_fasta_by_threads(
+                        f'{args.output}/tmp/{taxid}.fasta', f'{args.output}/tmp/fasta_{taxid}', args.threads)
+        split_fasta_by_threads(args.file, f'{args.output}/tmp/tmp', args.threads)     # will likely always need to do this splitting
+
         databases_prefixes = {
             'CDD': 'cd', 'Pfam': 'pfam', 'NCBIfam': 'NF', 'Protein_Clusters': 'PRK', 'Smart': 'smart',
             'TIGRFAM': 'TIGR', 'COG': 'COG', 'KOG': 'KOG'}
-
         for base in args.databases:
             db_hmm_pgap = hmm_pgap[hmm_pgap['source_identifier'].str.startswith(databases_prefixes[base])]
             timed_message(f'Running annotation with RPS-BLAST and {base} database as reference.')
             if hasattr(args, "tax_file") and base in ['Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
-                taxonomic_db_workflow(
+                taxonomic_workflow(
                     args.output, args.resources_directory, args.threads, lineages, all_taxids, databases_prefixes, base,
                     db_hmm_pgap, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
             else:
-                multithreaded_db_workflow(
-                    args.file, args.output, args.resources_directory, args.threads, databases_prefixes, base,
+                multiprocess_workflow(
+                    args.output, args.resources_directory, args.threads, databases_prefixes, base,
                     max_target_seqs=args.max_target_seqs, evalue=args.evalue)
 
         organize_results(
-            args.file, args.output, args.resources_directory, args.databases, hmm_pgap, cddid, fun, pident=args.pident,
+            args.file, args.output, args.resources_directory, args.databases, hmm_pgap, cddid, fun,
             no_output_sequences=args.no_output_sequences)
 
 
