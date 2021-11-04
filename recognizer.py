@@ -206,7 +206,7 @@ def run_rpsblast(query, output, reference, threads='0', max_target_seqs=1, evalu
     # This run_command is different because of reference, which can't be split by space
     bashCommand = ['rpsblast', '-query', query, '-db', reference, '-out', output, '-outfmt', '11',
                    '-num_threads', str(threads), '-max_target_seqs', str(max_target_seqs), '-evalue', str(evalue)]
-    print(' '.join(bashCommand))
+    #print(' '.join(bashCommand))
     run(bashCommand, stdout=DEVNULL)
 
 
@@ -293,7 +293,7 @@ def get_lineages(taxids, taxonomy_df):
 
 
 def get_lineages_multiprocessing(taxids, taxonomy_df, threads=14):
-    timed_message(f'Listing all parent tax IDs for {len(taxids)} tax IDs')
+    timed_message(f'Listing all parent tax IDs for {len(taxids)} tax IDs (this may take a while, time for coffee?)')
     taxids_groups = split(list(taxids), threads)
     lineages, res_taxids = ({}, [])
     with Manager() as m:
@@ -331,9 +331,9 @@ def create_tax_db(smp_directory, output, db_prefix, taxids, hmm_pgap):
 def is_db_good(database):
     for ext in ['aux', 'freq', 'loo', 'pdb', 'phr', 'pin', 'pos', 'pot', 'psq', 'ptf', 'pto', 'rps']:
         if not os.path.isfile(f'{database}.{ext}'):
-            print(f'{database}.{ext} not found!')
+            print(f'{database}.{ext} not found! Rebuilding database...')
             return False
-    print(f'{database} seems good!')
+    #print(f'{database} seems good!')
     return True
 
 
@@ -459,9 +459,9 @@ def check_regular_database(smp_directory, db_prefix):
     if remake_db:
         print(f'Some part of {db_prefix} was not valid! Will rebuild!')
         smp_list = glob(f'{smp_directory}/{db_prefix}*.smp')
-        with open(f'{output}/{db_prefix}.pn', 'w') as f:
+        with open(f'{smp_directory}/{db_prefix}.pn', 'w') as f:
             f.write('\n'.join(smp_list))
-        pn2database(f'{output}/{db_prefix}.pn')
+        pn2database(f'{smp_directory}/{db_prefix}.pn')
     else:
         print(f'A valid {db_prefix} split database was found!')
 
@@ -520,7 +520,7 @@ def add_sequences(file, report):
 
 def run_rpsbproc(asn_report, resources_directory, evalue):
     run_pipe_command(
-        f'rpsbproc -i {asn_report} -o {asn_report.replace(".asn", ".rpsbproc")} -d {resources_directory} -e {evalue} '
+        f'rpsbproc -i {asn_report} -o {asn_report.replace("asn", "rpsbproc")} -d {resources_directory} -e {evalue} '
         f'-m rep -f -t both 2>verbose.log')
 
 
@@ -537,8 +537,11 @@ def parse_rpsbproc_section(handler, line, section_name, i):
 
 def parse_rpsbproc(file):
     file = open(file)
-    line = [next(file) for i in range(3)][-1]
     result = pd.DataFrame(columns=['DOMAINS', 'SUPERFAMILIES', 'SITES', 'MOTIFS'])
+    try:
+        line = [next(file) for i in range(3)][-1]
+    except StopIteration:
+        return result
     while line.startswith('#'):  # skip first section
         line = next(file)
     line = next(file, None)
@@ -548,7 +551,7 @@ def parse_rpsbproc(file):
         line = next(file)
         while not line.startswith('ENDSESSION'):
             query = line.rstrip('\n').split('\t')[4]
-            domains, superfamilies, sites, motifs = list(), list(), list(), list()
+            domains, superfamilies, sites, motifs = [], [], [], []
             line = next(file)
             while not line.startswith('ENDQUERY'):
                 domains, line = parse_rpsbproc_section(file, line, 'DOMAINS', 3)
@@ -639,16 +642,15 @@ def taxonomic_workflow(
     dbs = {taxid: [
         f'{resources_directory}/{databases_prefixes[base]}_{parent_taxid}' for parent_taxid in
         lineages[taxid] + ['0'] if parent_taxid in taxids_with_db] for taxid in lineages.keys()}
-
     db_report = pd.DataFrame(columns=['qseqid', 'sseqid', 'SUPERFAMILIES', 'SITES', 'MOTIFS'])
-    for taxid in tqdm(lineages.keys(), desc=timed_message('Running annotation')):
+    for taxid in lineages.keys():
         if os.path.isfile(f'{output}/tmp/{taxid}.fasta'):
             # Run RPS-BLAST
             with Pool(processes=threads) as p:
                 p.starmap(run_rpsblast, [(
-                    f'{output}/tmp/fasta_{taxid}_{i}.fasta', f'{output}/asn/{base}_{taxid}_{i}_aligned.asn',
+                    f'{output}/tmp/tmp_{taxid}_{i}.fasta', f'{output}/asn/{base}_{taxid}_{i}_aligned.asn',
                     ' '.join(dbs[taxid]), '1', max_target_seqs, evalue) for i in range(threads)
-                    if os.path.isfile(f'{output}/tmp/fasta_{taxid}_{i}.fasta')])
+                    if os.path.isfile(f'{output}/tmp/tmp_{taxid}_{i}.fasta')])
             # Convert ASN-11 to TAB-6
             with Pool(processes=threads) as p:
                 p.starmap(run_blast_formatter, [(
@@ -666,8 +668,8 @@ def taxonomic_workflow(
                     if len(rpsbproc_report) > 0:
                         db_report = db_report.append(rpsbproc_report)
     db_report.to_csv(f'{output}/{base}_report.tsv', sep='\t')
-    run_pipe_command(f'cat {output}/blast/{base}_*_*_aligned.blast', output=f'{output}/blast/{base}_aligned.blast')
-    run_command(f'rm {output}/blast/{base}_*_*_aligned.blast')
+    run_pipe_command(f'cat {output}/blast/{base}_*_*_aligned.blast', file=f'{output}/blast/{base}_aligned.blast')
+    run_pipe_command(f'rm {output}/blast/{base}_*_*_aligned.blast')
 
 
 def multiprocess_workflow(
@@ -677,14 +679,14 @@ def multiprocess_workflow(
     with Pool(processes=threads) as p:
         p.starmap(run_rpsblast, [(
             f'{output}/tmp/tmp_{i}.fasta', f'{output}/asn/{base}_{i}_aligned.asn',
-            f'{resources_directory}/{base}', '1', max_target_seqs, evalue) for i in range(threads)])
+            f'{resources_directory}/{databases_prefixes[base]}', '1', max_target_seqs, evalue) for i in range(threads)])
     # Convert ASN-11 to TAB-6
     with Pool(processes=threads) as p:
         p.starmap(run_blast_formatter, [(
             f'{output}/asn/{base}_{i}_aligned.asn',
             f'{output}/blast/{base}_{i}_aligned.blast') for i in range(threads)
             if os.path.isfile(f'{output}/asn/{base}_{i}_aligned.asn')])
-    run_pipe_command(f'cat {output}/blast/{base}_*_aligned.blast', output=f'{output}/blast/{base}_aligned.blast')
+    run_pipe_command(f'cat {output}/blast/{base}_*_aligned.blast', file=f'{output}/blast/{base}_aligned.blast')
     # Convert ASN to RPSBPROC
     with Pool(processes=threads) as p:
         p.starmap(run_rpsbproc, [(
@@ -697,12 +699,11 @@ def multiprocess_workflow(
             if len(rpsbproc_report) > 0:
                 db_report = db_report.append(rpsbproc_report)
     db_report.to_csv(f'{output}/{base}_report.tsv', sep='\t')
-    run_pipe_command(f'cat {output}/blast/{base}_*_aligned.blast', output=f'{output}/blast/{base}_aligned.blast')
-    run_command(f'rm {output}/blast/{base}_*_aligned.blast')
+    run_pipe_command(f'cat {output}/blast/{base}_*_aligned.blast', file=f'{output}/blast/{base}_aligned.blast')
+    run_pipe_command(f'rm {output}/blast/{base}_*_aligned.blast')
 
 
-def organize_results(
-        file, output, resources_directory, databases, hmm_pgap, cddid, fun, no_output_sequences=False):
+def organize_results(file, output, resources_directory, databases, hmm_pgap, cddid, fun, no_output_sequences=False):
     timed_message("Organizing annotation results")
     i = 1
     xlsx_report = pd.ExcelWriter(f'{output}/reCOGnizer_results.xlsx', engine='xlsxwriter')
@@ -748,9 +749,8 @@ def main():
             for taxid in tqdm(lineages.keys(), desc=timed_message('Splitting FASTA')):
                 if os.path.isfile(f'{args.output}/tmp/{taxid}.fasta'):
                     split_fasta_by_threads(
-                        f'{args.output}/tmp/{taxid}.fasta', f'{args.output}/tmp/fasta_{taxid}', args.threads)
+                        f'{args.output}/tmp/{taxid}.fasta', f'{args.output}/tmp/tmp_{taxid}', args.threads)
         split_fasta_by_threads(args.file, f'{args.output}/tmp/tmp', args.threads)     # will likely always need to do this splitting
-
         databases_prefixes = {
             'CDD': 'cd', 'Pfam': 'pfam', 'NCBIfam': 'NF', 'Protein_Clusters': 'PRK', 'Smart': 'smart',
             'TIGRFAM': 'TIGR', 'COG': 'COG', 'KOG': 'KOG'}
