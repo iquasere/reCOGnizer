@@ -207,7 +207,7 @@ def run_rpsblast(query, output, reference, threads='0', max_target_seqs=1, evalu
     bashCommand = ['rpsblast', '-query', query, '-db', reference, '-out', output, '-outfmt', '11',
                    '-num_threads', str(threads), '-max_target_seqs', str(max_target_seqs), '-evalue', str(evalue)]
     #print(' '.join(bashCommand))
-    run(bashCommand, stdout=DEVNULL)
+    run(bashCommand, stdout=DEVNULL, stderr=DEVNULL)
 
 
 def parse_cddid(cddid):
@@ -247,15 +247,13 @@ def parse_kog(kog):
 
 
 def parse_blast(file):
+    blast_cols = ['qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen', 'qstart', 'qend', 'sstart', 'send',
+                  'evalue', 'bitscore']
     if os.stat(file).st_size != 0:
         blast = pd.read_csv(file, sep='\t', header=None)
-        blast.columns = [
-            'qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen', 'qstart', 'qend', 'sstart', 'send', 'evalue',
-            'bitscore']
+        blast.columns = blast_cols
         return blast
-    return pd.DataFrame(columns=[
-        'qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen', 'qstart', 'qend', 'sstart', 'send', 'evalue',
-        'bitscore'])
+    return pd.DataFrame(columns=blast_cols)
 
 
 def pn2database(pn):
@@ -632,6 +630,11 @@ def custom_database_workflow(file, output, threads, max_target_seqs, evalue, dat
         file, f'{output}/aligned.blast', ' '.join(dbs), threads=threads, max_target_seqs=max_target_seqs, evalue=evalue)
 
 
+def clean_intermediates(output, base):
+    for report in ['asn', 'blast', 'rpsbproc']:
+        run_pipe_command(f'rm {output}/{report}/{base}_*_aligned.{report}')
+
+
 def taxonomic_workflow(
         output, resources_directory, threads, lineages, all_taxids, databases_prefixes, base, hmm_pgap,
         max_target_seqs=1, evalue=1e-5):
@@ -639,9 +642,11 @@ def taxonomic_workflow(
     hmm_pgap_taxids = get_hmm_pgap_taxids(all_taxids, databases_prefixes[base], hmm_pgap)
     taxids_with_db = check_tax_databases(
         resources_directory, resources_directory, databases_prefixes[base], hmm_pgap_taxids, hmm_pgap)
+    check_regular_database(resources_directory, databases_prefixes[base])  # for proteins with no taxonomy
     dbs = {taxid: [
         f'{resources_directory}/{databases_prefixes[base]}_{parent_taxid}' for parent_taxid in
         lineages[taxid] + ['0'] if parent_taxid in taxids_with_db] for taxid in lineages.keys()}
+    dbs = {**dbs, **{'0': f'{resources_directory}/{databases_prefixes[base]}'}}
     db_report = pd.DataFrame(columns=['qseqid', 'sseqid', 'SUPERFAMILIES', 'SITES', 'MOTIFS'])
     for taxid in lineages.keys():
         if os.path.isfile(f'{output}/tmp/{taxid}.fasta'):
@@ -668,8 +673,6 @@ def taxonomic_workflow(
                     if len(rpsbproc_report) > 0:
                         db_report = db_report.append(rpsbproc_report)
     db_report.to_csv(f'{output}/{base}_report.tsv', sep='\t')
-    run_pipe_command(f'cat {output}/blast/{base}_*_*_aligned.blast', file=f'{output}/blast/{base}_aligned.blast')
-    run_pipe_command(f'rm {output}/blast/{base}_*_*_aligned.blast')
 
 
 def multiprocess_workflow(
@@ -699,8 +702,6 @@ def multiprocess_workflow(
             if len(rpsbproc_report) > 0:
                 db_report = db_report.append(rpsbproc_report)
     db_report.to_csv(f'{output}/{base}_report.tsv', sep='\t')
-    run_pipe_command(f'cat {output}/blast/{base}_*_aligned.blast', file=f'{output}/blast/{base}_aligned.blast')
-    run_pipe_command(f'rm {output}/blast/{base}_*_aligned.blast')
 
 
 def organize_results(file, output, resources_directory, databases, hmm_pgap, cddid, fun, no_output_sequences=False):
@@ -709,6 +710,7 @@ def organize_results(file, output, resources_directory, databases, hmm_pgap, cdd
     xlsx_report = pd.ExcelWriter(f'{output}/reCOGnizer_results.xlsx', engine='xlsxwriter')
     all_reports = pd.DataFrame()
     for db in databases:
+        run_pipe_command(f'cat {output}/blast/{db}_*_aligned.blast', file=f'{output}/blast/{db}_aligned.blast')
         print(f'[{i}/{len(databases)}] Handling {db} annotation')
         report = pd.read_csv(f'{output}/{db}_report.tsv', sep='\t', index_col=0)
         report = pd.merge(
@@ -722,6 +724,7 @@ def organize_results(file, output, resources_directory, databases, hmm_pgap, cdd
         all_reports = pd.concat([all_reports, report])
         multi_sheet_excel(xlsx_report, report, sheet_name=db)
         i += 1
+        clean_intermediates(output, db)
     all_reports.sort_values(by=['qseqid', 'DB ID']).to_csv(f'{output}/reCOGnizer_results.tsv', sep='\t', index=False)
     xlsx_report.save()
 
