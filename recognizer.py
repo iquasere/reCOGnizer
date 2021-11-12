@@ -23,9 +23,11 @@ from Bio import Entrez, SeqIO
 from requests import get as requests_get
 import xml.etree.ElementTree as ET
 
-__version__ = '1.6.0'
+__version__ = '1.6.1'
 
 Entrez.email = "A.N.Other@example.com"
+
+default_print_command = False
 
 
 def get_arguments():
@@ -102,13 +104,13 @@ def timed_message(message):
     print(f'{strftime("%Y-%m-%d %H:%M:%S", gmtime())}: {message}')
 
 
-def run_command(bash_command, print_command=False, stdout=None, stderr=None):
+def run_command(bash_command, print_command=default_print_command, stdout=None, stderr=None):
     if print_command:
         print(bash_command)
     run(bash_command.split(), stdout=stdout, stderr=stderr)
 
 
-def run_pipe_command(bash_command, file='', mode='w', print_command=False):
+def run_pipe_command(bash_command, file='', mode='w', print_command=default_print_command):
     if print_command:
         print(bash_command)
     if file == '':
@@ -204,10 +206,9 @@ def str2bool(v):
 
 def run_rpsblast(query, output, reference, threads='0', max_target_seqs=1, evalue=1e-2):
     # This run_command is different because of reference, which can't be split by space
-    bashCommand = ['rpsblast', '-query', query, '-db', reference, '-out', output, '-outfmt', '11',
-                   '-num_threads', str(threads), '-max_target_seqs', str(max_target_seqs), '-evalue', str(evalue)]
-    #print(' '.join(bashCommand))
-    run(bashCommand, stdout=DEVNULL, stderr=DEVNULL)
+    bash_command = f'rpsblast -query {query} -db "{reference}" -out {output} -outfmt 11 -num_threads {threads} ' \
+                   f'-max_target_seqs {max_target_seqs} -evalue {evalue} 1>recognizer.log 2>recognizer.log'
+    run_pipe_command(bash_command)
 
 
 def parse_cddid(cddid):
@@ -247,13 +248,15 @@ def parse_kog(kog):
 
 
 def parse_blast(file):
-    blast_cols = ['qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen', 'qstart', 'qend', 'sstart', 'send',
-                  'evalue', 'bitscore']
     if os.stat(file).st_size != 0:
         blast = pd.read_csv(file, sep='\t', header=None)
-        blast.columns = blast_cols
+        blast.columns = [
+            'qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen', 'qstart', 'qend', 'sstart', 'send', 'evalue',
+            'bitscore']
         return blast
-    return pd.DataFrame(columns=blast_cols)
+    return pd.DataFrame(columns=[
+        'qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen', 'qstart', 'qend', 'sstart', 'send', 'evalue',
+        'bitscore'])
 
 
 def pn2database(pn):
@@ -646,9 +649,9 @@ def taxonomic_workflow(
     dbs = {taxid: [
         f'{resources_directory}/{databases_prefixes[base]}_{parent_taxid}' for parent_taxid in
         lineages[taxid] + ['0'] if parent_taxid in taxids_with_db] for taxid in lineages.keys()}
-    dbs = {**dbs, **{'0': f'{resources_directory}/{databases_prefixes[base]}'}}
+    dbs = {**dbs, **{'0': [f'{resources_directory}/{databases_prefixes[base]}']}}
     db_report = pd.DataFrame(columns=['qseqid', 'sseqid', 'SUPERFAMILIES', 'SITES', 'MOTIFS'])
-    for taxid in lineages.keys():
+    for taxid in list(lineages.keys()) + ['0']:
         if os.path.isfile(f'{output}/tmp/{taxid}.fasta'):
             # Run RPS-BLAST
             with Pool(processes=threads) as p:
@@ -720,11 +723,12 @@ def organize_results(file, output, resources_directory, databases, hmm_pgap, cdd
         if not no_output_sequences:
             report = add_sequences(file, report)        # adding protein sequences if requested
         report = add_db_info(report, db, resources_directory, output, hmm_pgap, fun)
+        report = report.drop_duplicates()
         # report = report[report['pident'] > pident]  # filter matches by pident - seems no longer implementable after rpsbproc integration
         all_reports = pd.concat([all_reports, report])
         multi_sheet_excel(xlsx_report, report, sheet_name=db)
         i += 1
-        clean_intermediates(output, db)
+        #clean_intermediates(output, db)
     all_reports.sort_values(by=['qseqid', 'DB ID']).to_csv(f'{output}/reCOGnizer_results.tsv', sep='\t', index=False)
     xlsx_report.save()
 
