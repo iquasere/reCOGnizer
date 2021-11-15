@@ -77,8 +77,9 @@ def get_arguments():
 
     taxArguments = parser.add_argument_group('taxonomy arguments')
     taxArguments.add_argument(
-        "--tax-file", help="File with taxonomic identification of proteins inputted (TSV). "
-                           "Must have one line per query, query name on first column, taxid on second.")
+        "--tax-file", default=None,
+        help="File with taxonomic identification of proteins inputted (TSV). "
+             "Must have one line per query, query name on first column, taxid on second.")
     taxArguments.add_argument(
         "--protein-id-col", default='qseqid',
         help="Name of column with protein headers as in supplied FASTA file [qseqid]")
@@ -748,7 +749,7 @@ def main():
         custom_database_workflow(
             args.file, args.output, args.threads, args.max_target_seqs, args.evalue, database=args.database)
     else:
-        if hasattr(args, "tax_file"):
+        if args.tax_file is not None:
             tax_file, lineages, all_taxids = taxids_of_interest(
                 args.tax_file, args.protein_id_col, args.tax_col, taxonomy_df)
             split_fasta_by_taxid(args.file, tax_file, args.protein_id_col, args.tax_col, args.output)
@@ -764,7 +765,7 @@ def main():
         for base in args.databases:
             db_hmm_pgap = hmm_pgap[hmm_pgap['source_identifier'].str.startswith(databases_prefixes[base])]
             timed_message(f'Running annotation with RPS-BLAST and {base} database as reference.')
-            if hasattr(args, "tax_file") and base in ['Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
+            if args.tax_file is not None and base in ['Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
                 taxonomic_workflow(
                     args.output, args.resources_directory, args.threads, lineages, all_taxids, databases_prefixes, base,
                     db_hmm_pgap, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
