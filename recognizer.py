@@ -23,20 +23,20 @@ from Bio import Entrez, SeqIO
 from requests import get as requests_get
 import xml.etree.ElementTree as ET
 
-__version__ = '1.6.1'
+__version__ = '1.6.2'
 
 Entrez.email = "A.N.Other@example.com"
 
-default_print_command = False
+default_print_command = False        # more for debugging purposes
 
 
 def get_arguments():
     parser = ArgumentParser(
-        description="reCOGnizer - a tool for domain based annotation with the COG database",
+        description="reCOGnizer - a tool for domain based annotation with the CDD database",
         epilog="Input file must be specified.")
     parser.add_argument("-t", "--threads", type=int, default=cpu_count() - 2,
                         help="Number of threads for reCOGnizer to use [max available - 2]")
-    parser.add_argument("--evalue", type=float, default=1e-2, help="Maximum e-value to report annotations for [1e-2]")
+    parser.add_argument("--evalue", type=float, default=1e-3, help="Maximum e-value to report annotations for [1e-2]")
     parser.add_argument(
         "--pident", type=float, default=0.0, help="[DEPRECATED] Minimum pident to report annotations for [0]")
     parser.add_argument(
@@ -84,8 +84,11 @@ def get_arguments():
         "--protein-id-col", default='qseqid',
         help="Name of column with protein headers as in supplied FASTA file [qseqid]")
     taxArguments.add_argument(
-        "--tax-col", default='Taxonomic identifier (GENUS)',
-        help="Name of column with tax IDs of proteins [Taxonomic identifier (GENUS)]")
+        "--tax-col", default='Taxonomic identifier (SPECIES)',
+        help="Name of column with tax IDs of proteins [Taxonomic identifier (SPECIES)]")
+    taxArguments.add_argument(
+        "--species-taxids", default=False, action='store_true',
+        help="If tax col contains Tax IDs of species (required for running COG taxonomic)")
 
     args = parser.parse_args()
 
@@ -121,10 +124,6 @@ def run_pipe_command(bash_command, file='', mode='w', print_command=default_prin
     else:
         with open(file, mode) as output_file:
             Popen(bash_command, stdin=PIPE, shell=True, stdout=output_file).communicate()
-
-
-def parse_fasta(filename):
-    return SeqIO.parse(filename, "fasta")
 
 
 def get_tabular_taxonomy(output):
@@ -276,8 +275,8 @@ def get_upper_taxids(taxid, tax_df):
     :returns list - of upper taxIDs
     """
     if taxid == '0':
-        return list()
-    taxids = list()
+        return []
+    taxids = []
     while taxid != '1' and taxid != 'Taxon':
         taxids.append(taxid)
         taxid = tax_df.loc[taxid]['parent_taxid']
@@ -330,10 +329,11 @@ def create_tax_db(smp_directory, output, db_prefix, taxids, hmm_pgap):
     return taxids_with_db
 
 
-def is_db_good(database):
+def is_db_good(database, print_warning=True):
     for ext in ['aux', 'freq', 'loo', 'pdb', 'phr', 'pin', 'pos', 'pot', 'psq', 'ptf', 'pto', 'rps']:
         if not os.path.isfile(f'{database}.{ext}'):
-            print(f'{database}.{ext} not found! Rebuilding database...')
+            if print_warning:
+                print(f'{database}.{ext} not found! Rebuilding database...')
             return False
     #print(f'{database} seems good!')
     return True
@@ -456,6 +456,75 @@ def check_tax_databases(smp_directory, output, db_prefix, taxids, hmm_pgap):
     return taxids_with_db + taxids_lacking_db
 
 
+def get_members_df(resources_directory):
+    if os.path.isfile(f'{resources_directory}/members_df.tsv'):
+        return pd.read_csv(f'{resources_directory}/members_df.tsv', sep='\t', index_col=0)
+    members = pd.read_csv(f'{resources_directory}/NOG.members.tsv', sep='\t', header=None)
+    members = members[members[1].str.startswith('COG')]
+    members[5] = members[5].apply(lambda x: [name.split('.')[0] for name in x.split(',')])
+    members_dict = {}
+    for i in tqdm(range(len(members)), desc='Organizing COGs corresponding to each tax ID'):
+        for taxid in members.iloc[i, 5]:
+            if taxid in members_dict.keys():
+                members_dict[taxid] += f',{members.iloc[i, 1]}'
+            else:
+                members_dict[taxid] = members.iloc[i, 1]
+    members_df = pd.DataFrame.from_dict(members_dict, orient='index')
+    members_df.columns = ['cogs']
+    members_df.to_csv(f'{resources_directory}/members_df.tsv', sep='\t')
+    return members_df
+
+
+def check_cog_tax_database(smp_directory, output):
+    smps = glob(f'{smp_directory}/COG*.smp')
+    for smp in tqdm(smps, desc=f'Checking split COG database for [{len(smps)}] COGs.'):
+        name = smp.split('/')[-1].split('.')[0]
+        with open(f'{output}/{name}.pn', 'w') as f:
+            f.write(smp)
+        if not is_db_good(f'{output}/{name}', print_warning=False):
+            pn2database(f'{output}/{name}.pn')
+
+
+def cog_taxonomic_workflow(
+        output, resources_directory, threads, tax_file, tax_col, members_df, max_target_seqs=1, evalue=1e-5):
+    check_cog_tax_database(resources_directory, resources_directory)  # for proteins with no taxonomy
+    members_df.index = members_df.index.astype(str)
+    members_taxids = members_df.index.tolist()
+    db_report = pd.DataFrame(columns=['qseqid', 'sseqid', 'SUPERFAMILIES', 'SITES', 'MOTIFS'])
+    for taxid in set(tax_file[tax_col].tolist()):
+        # Run RPS-BLAST
+        if taxid not in members_taxids:
+            with Pool(processes=threads) as p:
+                p.starmap(run_rpsblast, [(
+                    f'{output}/tmp/tmp_{taxid}_{i}.fasta', f'{output}/asn/COG_{taxid}_{i}_aligned.asn',
+                    f'{resources_directory}/COG', '1', max_target_seqs, evalue) for i in range(threads)
+                    if os.path.isfile(f'{output}/tmp/tmp_{taxid}_{i}.fasta')])
+        else:
+            with Pool(processes=threads) as p:
+                p.starmap(run_rpsblast, [(
+                    f'{output}/tmp/tmp_{taxid}_{i}.fasta', f'{output}/asn/COG_{taxid}_{i}_aligned.asn',
+                    ' '.join([f'{resources_directory}/{cog}' for cog in members_df.loc[taxid]['cogs']]), '1',
+                    max_target_seqs, evalue) for i in range(threads)
+                    if os.path.isfile(f'{output}/tmp/tmp_{taxid}_{i}.fasta')])
+        # Convert ASN-11 to TAB-6
+        with Pool(processes=threads) as p:
+            p.starmap(run_blast_formatter, [(
+                f'{output}/asn/COG_{taxid}_{i}_aligned.asn',
+                f'{output}/blast/COG_{taxid}_{i}_aligned.blast') for i in range(threads)
+                if os.path.isfile(f'{output}/asn/COG_{taxid}_{i}_aligned.asn')])
+        # Convert ASN to RPSBPROC
+        with Pool(processes=threads) as p:
+            p.starmap(run_rpsbproc, [(
+                f'{output}/asn/COG_{taxid}_{i}_aligned.asn', resources_directory, evalue) for i in range(threads)
+                if os.path.isfile(f'{output}/asn/COG_{taxid}_{i}_aligned.asn')])
+        for i in range(threads):
+            if os.path.isfile(f'{output}/rpsbproc/COG_{taxid}_{i}_aligned.rpsbproc'):
+                rpsbproc_report = get_rpsbproc_info(f'{output}/rpsbproc/COG_{taxid}_{i}_aligned.rpsbproc')
+                if len(rpsbproc_report) > 0:
+                    db_report = db_report.append(rpsbproc_report)
+    db_report.to_csv(f'{output}/COG_report.tsv', sep='\t')
+
+
 def check_regular_database(smp_directory, db_prefix):
     remake_db = not is_db_good(f'{smp_directory}/{db_prefix}')
     if remake_db:
@@ -483,7 +552,9 @@ def load_relational_tables(resources_directory):
     taxonomy_df = pd.read_csv(f'{resources_directory}/taxonomy.tsv', sep='\t', index_col='taxid',
                               dtype={'taxid': str, 'name': str, 'rank': str, 'parent_taxid': str})
     taxonomy_df['parent_taxid'] = taxonomy_df['parent_taxid'].fillna('0').apply(lambda x: x.split('.')[0])
-    return cddid, hmm_pgap, fun, taxonomy_df
+    members_df = get_members_df(resources_directory)
+    members_df['cogs'] = members_df['cogs'].apply(lambda x: set(x.split(',')))
+    return cddid, hmm_pgap, fun, taxonomy_df, members_df
 
 
 def replace_spaces_with_commas(file, tmp_dir):
@@ -740,7 +811,7 @@ def main():
     if args.download_resources:
         download_resources(args.resources_directory)
 
-    cddid, hmm_pgap, fun, taxonomy_df = load_relational_tables(args.resources_directory)
+    cddid, hmm_pgap, fun, taxonomy_df, members_df = load_relational_tables(args.resources_directory)
 
     if not args.keep_spaces:
         args.file = replace_spaces_with_commas(args.file, f'{args.output}/tmp')     # if alters input file, internally alters args.file
@@ -767,8 +838,13 @@ def main():
             timed_message(f'Running annotation with RPS-BLAST and {base} database as reference.')
             if args.tax_file is not None and base in ['Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
                 taxonomic_workflow(
-                    args.output, args.resources_directory, args.threads, lineages, all_taxids, databases_prefixes, base,
-                    db_hmm_pgap, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
+                    args.output, args.resources_directory, args.threads, lineages, all_taxids, databases_prefixes,
+                    base, db_hmm_pgap, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
+            elif base in ['COG'] and args.tax_file is not None and args.species_taxids:
+                print('Gonna do COG taxonomic!')
+                cog_taxonomic_workflow(
+                    args.output, args.resources_directory, args.threads, tax_file, args.tax_col, members_df,
+                    max_target_seqs=args.max_target_seqs, evalue=args.evalue)
             else:
                 multiprocess_workflow(
                     args.output, args.resources_directory, args.threads, databases_prefixes, base,
