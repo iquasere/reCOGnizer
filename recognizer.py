@@ -23,7 +23,7 @@ from Bio import Entrez, SeqIO
 from requests import get as requests_get
 import xml.etree.ElementTree as ET
 
-__version__ = '1.6.2'
+__version__ = '1.6.3'
 
 Entrez.email = "A.N.Other@example.com"
 
@@ -34,6 +34,7 @@ def get_arguments():
     parser = ArgumentParser(
         description="reCOGnizer - a tool for domain based annotation with the CDD database",
         epilog="Input file must be specified.")
+    parser.add_argument("-f", "--file", help="Fasta file with protein sequences for annotation")
     parser.add_argument("-t", "--threads", type=int, default=cpu_count() - 2,
                         help="Number of threads for reCOGnizer to use [max available - 2]")
     parser.add_argument("--evalue", type=float, default=1e-3, help="Maximum e-value to report annotations for [1e-2]")
@@ -71,11 +72,7 @@ def get_arguments():
         help="Information from the alignment will be stored in their own columns.")
     parser.add_argument('-v', '--version', action='version', version=f'reCOGnizer {__version__}')
 
-    requiredNamed = parser.add_argument_group('required named arguments')
-    requiredNamed.add_argument(
-        "-f", "--file", required=True, help="Fasta file with protein sequences for annotation")
-
-    taxArguments = parser.add_argument_group('taxonomy arguments')
+    taxArguments = parser.add_argument_group('Taxonomy Arguments')
     taxArguments.add_argument(
         "--tax-file", default=None,
         help="File with taxonomic identification of proteins inputted (TSV). "
@@ -172,8 +169,12 @@ def download_resources(directory):
         'https://ftp.ncbi.nlm.nih.gov/pub/COG/KOG/kog'
     ]:
         if os.path.isfile(f"{directory}/{location.split('/')[-1]}"):
-            if str2bool(input(f"{directory}/{location.split('/')[-1]} exists. Overwrite? [Y/N] ")):
-                run_command(f'wget {location} -P {directory}')
+            download = str2bool(input(f"{directory}/{location.split('/')[-1]} exists. Overwrite? [Y/N] "))
+        else:
+            download = True
+        if download:
+            print(f'Downloading {location}')
+            run_command(f'wget {location} -P {directory} -q')
 
     for file in ['cddid_all.tbl', 'eggnog4.protein_id_conversion.tsv', 'NOG.members.tsv']:
         run_command(f'gunzip {directory}/{file}.gz')
@@ -189,8 +190,9 @@ def download_resources(directory):
     os.chdir(directory)
     run_pipe_command(f'{tool} -xzf cdd.tar.gz --wildcards "*.smp"')
     os.chdir(wd)
-
     get_tabular_taxonomy(f'{directory}/taxonomy.tsv')
+    with open(f'{directory}/recognizer_dwnl.timestamp', 'w') as f:
+        f.write(strftime("%Y-%m-%d %H:%M:%S", gmtime()))
 
 
 def str2bool(v):
@@ -807,9 +809,20 @@ def organize_results(file, output, resources_directory, databases, hmm_pgap, cdd
 
 def main():
     args = get_arguments()
+    print(check_output('df -h', shell=True))
+    if not os.path.isfile(f'{args.resources_directory}/recognizer_dwnl.timestamp') and not args.download_resources:
+        args.download_resources = str2bool(input(
+            'Resources seem to not have been downloaded for reCOGnizer yet. Do you want to download them? [Y/N] '))
+
+    if not os.path.isfile(f'{args.resources_directory}/recognizer_dwnl.timestamp') and not args.download_resources:
+        args.download_resources = str2bool(input(
+            'Resources seem to not have been downloaded for reCOGnizer yet. Do you want to download them? [Y/N] '))
 
     if args.download_resources:
         download_resources(args.resources_directory)
+
+    if not hasattr(args, "file"):
+        exit('No input file specified.')
 
     cddid, hmm_pgap, fun, taxonomy_df, members_df = load_relational_tables(args.resources_directory)
 

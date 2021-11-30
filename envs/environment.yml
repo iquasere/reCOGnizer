@@ -1,0 +1,17 @@
+name: recognizer
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python
+  - pandas
+  - blast =2.10.1
+  - lxml
+  - openpyxl
+  - krona
+  - wget
+  - tqdm
+  - xlsxwriter
+  - biopython =1.78
+  - requests
