@@ -11,7 +11,6 @@ RUN buildDeps='build-essential zlib1g-dev' \
 && mamba env update --file reCOGnizer/envs/environment.yml --name base \
 && bash reCOGnizer/envs/ci_build.sh \
 && conda clean --all -y \
-&& apt-get purge -y --auto-remove $buildDeps \
-&& recognizer.py --download-resources -rd resources_directory
+&& apt-get purge -y --auto-remove $buildDeps
 
 CMD [ "python", "share/recognizer.py" ]
