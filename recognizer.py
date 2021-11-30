@@ -70,6 +70,8 @@ def get_arguments():
     parser.add_argument(
         "--no-blast-info", action="store_true", default=False,
         help="Information from the alignment will be stored in their own columns.")
+    parser.add_argument(
+        "--quiet", action="store_true", default=False, help="Don't output download information, used mainly for CI.")
     parser.add_argument('-v', '--version', action='version', version=f'reCOGnizer {__version__}')
 
     taxArguments = parser.add_argument_group('Taxonomy Arguments')
@@ -147,7 +149,10 @@ def get_tabular_taxonomy(output):
             written = f.write('\t'.join(info) + '\n')
 
 
-def download_resources(directory):
+def download_resources(directory, quiet=False):
+    if not os.path.isdir(f'{directory}/smps'):
+        Path(f'{directory}/smps').mkdir(parents=True, exist_ok=True)
+        print(f'Created {directory}/smps')
     for location in [
         # Download CDD
         'ftp://ftp.ncbi.nih.gov/pub/mmdb/cdd/cdd.tar.gz',
@@ -173,8 +178,12 @@ def download_resources(directory):
         else:
             download = True
         if download:
-            print(f'Downloading {location}')
-            run_command(f'wget {location} -P {directory} -q')
+            if quiet:
+                print(f'Downloading {location}')
+            run_command(
+                f'wget {location} '
+                f'-P {directory if location != "ftp://ftp.ncbi.nih.gov/pub/mmdb/cdd/cdd.tar.gz" else f"{directory}/smps"}'
+                f'{" -q" if quiet else ""}')
 
     for file in ['cddid_all.tbl', 'eggnog4.protein_id_conversion.tsv', 'NOG.members.tsv']:
         run_command(f'gunzip {directory}/{file}.gz')
@@ -187,7 +196,7 @@ def download_resources(directory):
     else:
         tool = 'tar'
     wd = os.getcwd()
-    os.chdir(directory)
+    os.chdir(f'{directory}/smps')
     run_pipe_command(f'{tool} -xzf cdd.tar.gz --wildcards "*.smp"')
     os.chdir(wd)
     get_tabular_taxonomy(f'{directory}/taxonomy.tsv')
@@ -819,10 +828,10 @@ def main():
             'Resources seem to not have been downloaded for reCOGnizer yet. Do you want to download them? [Y/N] '))
 
     if args.download_resources:
-        download_resources(args.resources_directory)
+        download_resources(args.resources_directory, quiet=args.quiet)
 
     if not hasattr(args, "file"):
-        exit('No input file specified.')
+        exit('No input file specified. Exiting.')
 
     cddid, hmm_pgap, fun, taxonomy_df, members_df = load_relational_tables(args.resources_directory)
 
