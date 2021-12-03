@@ -27,7 +27,7 @@ __version__ = '1.6.3'
 
 Entrez.email = "A.N.Other@example.com"
 
-default_print_command = False        # more for debugging purposes
+default_print_command = False        # for debugging purposes
 
 
 def get_arguments():
@@ -95,7 +95,7 @@ def get_arguments():
     args.resources_directory = args.resources_directory.rstrip('/')
 
     for directory in [f'{args.output}/{folder}' for folder in ['fasta', 'asn', 'blast', 'rpsbproc', 'tmp']] + [
-        args.resources_directory]:
+            f'{args.resources_directory}/dbs']:
         if not os.path.isdir(directory):
             Path(directory).mkdir(parents=True, exist_ok=True)
             print(f'Created {directory}')
@@ -115,7 +115,7 @@ def run_command(bash_command, print_command=default_print_command, stdout=None, 
 
 def run_pipe_command(bash_command, file='', mode='w', print_command=default_print_command):
     if print_command:
-        print(bash_command)
+        print(f'{bash_command}{f" > {file}" if file != "" else ""}')
     if file == '':
         Popen(bash_command, stdin=PIPE, shell=True).communicate()
     elif file == 'PIPE':
@@ -158,6 +158,13 @@ def download_resources(directory, quiet=False):
         'ftp://ftp.ncbi.nih.gov/pub/mmdb/cdd/cdd.tar.gz',
         'https://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/cddid_all.tbl.gz',
         'https://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/cdd.info',  # only for versions
+        # RPSBPROC
+        'https://ftp.ncbi.nih.gov/pub/mmdb/cdd/bitscore_specific.txt',
+        'https://ftp.ncbi.nih.gov/pub/mmdb/cdd/cddannot.dat.gz',
+        'https://ftp.ncbi.nih.gov/pub/mmdb/cdd/cddannot_generic.dat.gz',
+        'https://ftp.ncbi.nih.gov/pub/mmdb/cdd/cddid.tbl.gz',
+        'https://ftp.ncbi.nih.gov/pub/mmdb/cdd/cdtrack.txt',
+        'https://ftp.ncbi.nih.gov/pub/mmdb/cdd/family_superfamily_links',
         # COG categories
         'ftp.ncbi.nlm.nih.gov/pub/COG/COG2020/data/fun-20.tab',
         'ftp.ncbi.nlm.nih.gov/pub/COG/COG2020/data/cog-20.def.tab',
@@ -173,31 +180,33 @@ def download_resources(directory, quiet=False):
         # KOG
         'https://ftp.ncbi.nlm.nih.gov/pub/COG/KOG/kog'
     ]:
-        if os.path.isfile(f"{directory}/{location.split('/')[-1]}"):
+        if os.path.isfile(f"{directory}/{location.split('/')[-1].split('.gz')[0]}"):
             download = str2bool(input(f"{directory}/{location.split('/')[-1]} exists. Overwrite? [Y/N] "))
         else:
             download = True
         if download:
             if quiet:
-                print(f'Downloading {location}')
-            run_command(
-                f'wget {location} '
-                f'-P {directory if location != "ftp://ftp.ncbi.nih.gov/pub/mmdb/cdd/cdd.tar.gz" else f"{directory}/smps"}'
-                f'{" -q" if quiet else ""}')
+                print(f'Downloading {location}')        # quiet replaces all wget output with this simple message
+            run_command(f'wget {location} -P {directory}{" -q" if quiet else ""}')
 
-    for file in ['cddid_all.tbl', 'eggnog4.protein_id_conversion.tsv', 'NOG.members.tsv']:
-        run_command(f'gunzip {directory}/{file}.gz')
+    if os.path.isfile(f'{directory}/cdd.tar.gz'):
+        os.rename(f'{directory}/cdd.tar.gz', f'{directory}/smps/cdd.tar.gz')
+
+    for file in [
+        'cddid_all.tbl', 'eggnog4.protein_id_conversion.tsv', 'NOG.members.tsv', 'cddannot.dat',
+            'cddannot_generic.dat', 'cddid.tbl']:
+        run_command(f'gunzip {directory}/{file}.gz', print_command=True)
 
     # Extract the smps
     if sys.platform == "darwin":
         if which('gtar') is None:
-            run_command('brew install gnu-tar')
+            run_command('brew install gnu-tar', print_command=True)
         tool = 'gtar'
     else:
         tool = 'tar'
     wd = os.getcwd()
     os.chdir(f'{directory}/smps')
-    run_pipe_command(f'{tool} -xzf cdd.tar.gz --wildcards "*.smp"')
+    run_pipe_command(f'{tool} -xzf cdd.tar.gz --wildcards "*.smp"', print_command=True)
     os.chdir(wd)
     get_tabular_taxonomy(f'{directory}/taxonomy.tsv')
     with open(f'{directory}/recognizer_dwnl.timestamp', 'w') as f:
@@ -317,7 +326,7 @@ def get_lineages_multiprocessing(taxids, taxonomy_df, threads=14):
     return lineages, res_taxids
 
 
-def create_tax_db(smp_directory, output, db_prefix, taxids, hmm_pgap):
+def create_tax_db(smp_directory, db_directory, db_prefix, taxids, hmm_pgap):
     """
     Creates HMM DBs for all required tax IDs, and checks for DBS for cellular organisms and 0 (nan)
     :param smp_directory: (str) - Name of folder with the SMP files
@@ -332,10 +341,10 @@ def create_tax_db(smp_directory, output, db_prefix, taxids, hmm_pgap):
     for taxid in tqdm(taxids, desc=f'Organizing PN files for [{len(taxids)}] Tax IDs.'):
         smp_list = [f'{smp_directory}/{source}' for source in hmm_pgap[hmm_pgap['taxonomic_range'] == taxid][
             'source_identifier']]
-        with open(f'{output}/{db_prefix}_{taxid}.pn', 'w') as f:
+        with open(f'{db_directory}/{db_prefix}_{taxid}.pn', 'w') as f:
             f.write('\n'.join([f'{file}.smp' for file in set(smp_list)]))
     for taxid in taxids:
-        pn2database(f'{output}/{db_prefix}_{taxid}.pn')
+        pn2database(f'{db_directory}/{db_prefix}_{taxid}.pn')
         taxids_with_db.append(taxid)
     return taxids_with_db
 
@@ -455,15 +464,15 @@ def split_fasta_by_taxid(file, tax_file, protein_id_col, tax_col, output):
             f'{output}/tmp/{taxid}.fasta', protein_id_col)
 
 
-def check_tax_databases(smp_directory, output, db_prefix, taxids, hmm_pgap):
+def check_tax_databases(smp_directory, db_directory, db_prefix, taxids, hmm_pgap):
     taxids_lacking_db = []
     taxids_with_db = []
     for taxid in list(taxids):
-        if not is_db_good(f'{smp_directory}/{db_prefix}_{taxid}'):
+        if not is_db_good(f'{db_directory}/{db_prefix}_{taxid}'):
             taxids_lacking_db.append(taxid)
         else:
             taxids_with_db.append(taxid)
-    create_tax_db(smp_directory, output, db_prefix, taxids_lacking_db, hmm_pgap)
+    create_tax_db(smp_directory, db_directory, db_prefix, taxids_lacking_db, hmm_pgap)
     return taxids_with_db + taxids_lacking_db
 
 
@@ -486,19 +495,19 @@ def get_members_df(resources_directory):
     return members_df
 
 
-def check_cog_tax_database(smp_directory, output):
+def check_cog_tax_database(smp_directory, db_directory):
     smps = glob(f'{smp_directory}/COG*.smp')
     for smp in tqdm(smps, desc=f'Checking split COG database for [{len(smps)}] COGs.'):
         name = smp.split('/')[-1].split('.')[0]
-        with open(f'{output}/{name}.pn', 'w') as f:
+        with open(f'{db_directory}/{name}.pn', 'w') as f:
             f.write(smp)
-        if not is_db_good(f'{output}/{name}', print_warning=False):
-            pn2database(f'{output}/{name}.pn')
+        if not is_db_good(f'{db_directory}/{name}', print_warning=False):
+            pn2database(f'{db_directory}/{name}.pn')
 
 
 def cog_taxonomic_workflow(
         output, resources_directory, threads, tax_file, tax_col, members_df, max_target_seqs=1, evalue=1e-5):
-    check_cog_tax_database(resources_directory, resources_directory)  # for proteins with no taxonomy
+    check_cog_tax_database(f'{resources_directory}/smps', f'{resources_directory}/dbs')  # for proteins with no taxonomy
     members_df.index = members_df.index.astype(str)
     members_taxids = members_df.index.tolist()
     db_report = pd.DataFrame(columns=['qseqid', 'sseqid', 'SUPERFAMILIES', 'SITES', 'MOTIFS'])
@@ -508,7 +517,7 @@ def cog_taxonomic_workflow(
             with Pool(processes=threads) as p:
                 p.starmap(run_rpsblast, [(
                     f'{output}/tmp/tmp_{taxid}_{i}.fasta', f'{output}/asn/COG_{taxid}_{i}_aligned.asn',
-                    f'{resources_directory}/COG', '1', max_target_seqs, evalue) for i in range(threads)
+                    f'{resources_directory}/dbs/COG', '1', max_target_seqs, evalue) for i in range(threads)
                     if os.path.isfile(f'{output}/tmp/tmp_{taxid}_{i}.fasta')])
         else:
             with Pool(processes=threads) as p:
@@ -536,14 +545,13 @@ def cog_taxonomic_workflow(
     db_report.to_csv(f'{output}/COG_report.tsv', sep='\t')
 
 
-def check_regular_database(smp_directory, db_prefix):
-    remake_db = not is_db_good(f'{smp_directory}/{db_prefix}')
-    if remake_db:
+def check_regular_database(smp_directory, db_directory, db_prefix):
+    if not is_db_good(f'{db_directory}/{db_prefix}'):
         print(f'Some part of {db_prefix} was not valid! Will rebuild!')
         smp_list = glob(f'{smp_directory}/{db_prefix}*.smp')
-        with open(f'{smp_directory}/{db_prefix}.pn', 'w') as f:
+        with open(f'{db_directory}/{db_prefix}.pn', 'w') as f:
             f.write('\n'.join(smp_list))
-        pn2database(f'{smp_directory}/{db_prefix}.pn')
+        pn2database(f'{db_directory}/{db_prefix}.pn')
     else:
         print(f'A valid {db_prefix} split database was found!')
 
@@ -727,12 +735,13 @@ def taxonomic_workflow(
     all_taxids += ['131567', '0']  # cellular organisms and no taxonomy
     hmm_pgap_taxids = get_hmm_pgap_taxids(all_taxids, databases_prefixes[base], hmm_pgap)
     taxids_with_db = check_tax_databases(
-        resources_directory, resources_directory, databases_prefixes[base], hmm_pgap_taxids, hmm_pgap)
-    check_regular_database(resources_directory, databases_prefixes[base])  # for proteins with no taxonomy
+        f'{resources_directory}/smps', f'{resources_directory}/dbs', databases_prefixes[base], hmm_pgap_taxids,
+        hmm_pgap)
+    check_regular_database(f'{resources_directory}/smps', resources_directory, databases_prefixes[base])  # for proteins with no taxonomy
     dbs = {taxid: [
-        f'{resources_directory}/{databases_prefixes[base]}_{parent_taxid}' for parent_taxid in
+        f'{resources_directory}/dbs/{databases_prefixes[base]}_{parent_taxid}' for parent_taxid in
         lineages[taxid] + ['0'] if parent_taxid in taxids_with_db] for taxid in lineages.keys()}
-    dbs = {**dbs, **{'0': [f'{resources_directory}/{databases_prefixes[base]}']}}
+    dbs = {**dbs, **{'0': [f'{resources_directory}/dbs/{databases_prefixes[base]}']}}       # no taxonomy is annotated with all
     db_report = pd.DataFrame(columns=['qseqid', 'sseqid', 'SUPERFAMILIES', 'SITES', 'MOTIFS'])
     for taxid in list(lineages.keys()) + ['0']:
         if os.path.isfile(f'{output}/tmp/{taxid}.fasta'):
@@ -763,12 +772,13 @@ def taxonomic_workflow(
 
 def multiprocess_workflow(
         output, resources_directory, threads, databases_prefixes, base, max_target_seqs=5, evalue=0.01):
-    check_regular_database(resources_directory, databases_prefixes[base])
+    check_regular_database(f'{resources_directory}/smps', f'{resources_directory}/dbs', databases_prefixes[base])
     # Run RPS-BLAST
     with Pool(processes=threads) as p:
         p.starmap(run_rpsblast, [(
             f'{output}/tmp/tmp_{i}.fasta', f'{output}/asn/{base}_{i}_aligned.asn',
-            f'{resources_directory}/{databases_prefixes[base]}', '1', max_target_seqs, evalue) for i in range(threads)])
+            f'{resources_directory}/dbs/{databases_prefixes[base]}', '1',
+            max_target_seqs, evalue) for i in range(threads)])
     # Convert ASN-11 to TAB-6
     with Pool(processes=threads) as p:
         p.starmap(run_blast_formatter, [(
@@ -818,7 +828,7 @@ def organize_results(file, output, resources_directory, databases, hmm_pgap, cdd
 
 def main():
     args = get_arguments()
-    print(check_output('df -h', shell=True))
+
     if not os.path.isfile(f'{args.resources_directory}/recognizer_dwnl.timestamp') and not args.download_resources:
         args.download_resources = str2bool(input(
             'Resources seem to not have been downloaded for reCOGnizer yet. Do you want to download them? [Y/N] '))
