@@ -22,8 +22,9 @@ from time import time, gmtime, strftime
 from Bio import Entrez, SeqIO
 from requests import get as requests_get
 import xml.etree.ElementTree as ET
+import re
 
-__version__ = '1.6.3'
+__version__ = '1.6.4'
 
 Entrez.email = "A.N.Other@example.com"
 
@@ -35,8 +36,9 @@ def get_arguments():
         description="reCOGnizer - a tool for domain based annotation with the CDD database",
         epilog="Input file must be specified.")
     parser.add_argument("-f", "--file", help="Fasta file with protein sequences for annotation")
-    parser.add_argument("-t", "--threads", type=int, default=cpu_count() - 2,
-                        help="Number of threads for reCOGnizer to use [max available - 2]")
+    parser.add_argument(
+        "-t", "--threads", type=int, default=cpu_count() - 2,
+        help="Number of threads for reCOGnizer to use [max available - 2]")
     parser.add_argument("--evalue", type=float, default=1e-3, help="Maximum e-value to report annotations for [1e-2]")
     parser.add_argument(
         "--pident", type=float, default=0.0, help="[DEPRECATED] Minimum pident to report annotations for [0]")
@@ -59,7 +61,7 @@ def get_arguments():
     parser.add_argument(
         "--custom-database", action="store_true", default=False, help="If database was NOT produced by reCOGnizer")
     parser.add_argument(
-        "-mts", "--max-target-seqs", type=int, default=1, help="Number of maximum identifications for each protein [1]")
+        "-mts", "--max-target-seqs", type=int, default=20, help="Number of maximum identifications for each protein [1]")
     parser.add_argument(
         "--keep-spaces", action="store_true", default=False,
         help="BLAST ignores sequences IDs after the first space. "
@@ -94,11 +96,12 @@ def get_arguments():
     args.output = args.output.rstrip('/')
     args.resources_directory = args.resources_directory.rstrip('/')
 
-    for directory in [f'{args.output}/{folder}' for folder in ['fasta', 'asn', 'blast', 'rpsbproc', 'tmp']] + [
-            f'{args.resources_directory}/dbs']:
-        if not os.path.isdir(directory):
-            Path(directory).mkdir(parents=True, exist_ok=True)
-            print(f'Created {directory}')
+    if hasattr(args, "file"):
+        for directory in [f'{args.output}/{folder}' for folder in ['fasta', 'asn', 'blast', 'rpsbproc', 'tmp']] + [
+                f'{args.resources_directory}/dbs']:
+            if not os.path.isdir(directory):
+                Path(directory).mkdir(parents=True, exist_ok=True)
+                print(f'Created {directory}')
 
     return args
 
@@ -111,6 +114,13 @@ def run_command(bash_command, print_command=default_print_command, stdout=None, 
     if print_command:
         print(bash_command)
     run(bash_command.split(), stdout=stdout, stderr=stderr)
+
+
+def human_time(seconds):
+    days = seconds // 86400
+    if days > 0:
+        return strftime(f"{days}d%Hh%Mm%Ss", gmtime(seconds))
+    return strftime("%Hh%Mm%Ss", gmtime(seconds))
 
 
 def run_pipe_command(bash_command, file='', mode='w', print_command=default_print_command):
@@ -207,10 +217,14 @@ def download_resources(directory, quiet=False):
     wd = os.getcwd()
     os.chdir(f'{directory}/smps')
     run_pipe_command(f'{tool} -xzf cdd.tar.gz --wildcards "*.smp"', print_command=True)
+    os.remove('cdd.tar.gz')
     os.chdir(wd)
     get_tabular_taxonomy(f'{directory}/taxonomy.tsv')
     with open(f'{directory}/recognizer_dwnl.timestamp', 'w') as f:
         f.write(strftime("%Y-%m-%d %H:%M:%S", gmtime()))
+
+    generate_cog2ec_df(
+        f'{directory}/eggnog4.protein_id_conversion.tsv', f'{directory}/NOG.members.tsv', directory)
 
 
 def str2bool(v):
@@ -359,8 +373,9 @@ def is_db_good(database, print_warning=True):
     return True
 
 
-def cog2ec(cogblast, table=f'{sys.path[0]}/resources_directory/cog2ec.tsv',
-           resources_dir=f'{sys.path[0]}/resources_directory'):
+def cog2ec(
+        cogblast, table=f'{sys.path[0]}/resources_directory/cog2ec.tsv',
+        resources_dir=f'{sys.path[0]}/resources_directory'):
     if not os.path.isfile(table):
         run_command('python {0}/cog2ec.py -c {0}/eggnog4.protein_id_conversion.tsv -m {0}/NOG.members.tsv'.format(
             resources_dir), stdout=open(table, 'w'))
@@ -378,8 +393,7 @@ def cog2ko(cogblast, cog2ko_ssv=f'{sys.path[0]}/resources_directory/cog2ko.ssv')
                 run_command(f'wget -P {directory} {web_locations[file]}')
                 run_command(f'gunzip {directory}/{file}.gz')
         run_pipe_command(
-            """grep -E 'K[0-9]{5}$' """ + directory + """/protein.info.v11.0.txt | 
-            awk '{{if (length($NF) == 6) print $1, $NF}}'""",
+            f"grep -E 'K[0-9]{5}$' {directory}/protein.info.v11.0.txt | awk '{{if (length($NF) == 6) print $1, $NF}}'",
             file=f'{directory}/string2ko.tsv')
         run_pipe_command(
             """awk '{{if (length($4) == 7) print $1"\t"$4}}' {0}/COG.mappings.v11.0.txt | sort | 
@@ -563,7 +577,7 @@ def load_relational_tables(resources_directory):
     hmm_pgap = pd.read_csv(f'{resources_directory}/hmm_PGAP.tsv', sep='\t', usecols=[1, 10, 12, 14, 15])
     hmm_pgap['source_identifier'] = [ide.split('.')[0] for ide in hmm_pgap['source_identifier']]
     hmm_pgap['source_identifier'] = hmm_pgap['source_identifier'].str.replace('PF', 'pfam')
-    smps = [filename.split('/')[-1].rstrip('.smp') for filename in glob(f'{resources_directory}/*.smp')]
+    smps = [filename.split('/')[-1].rstrip('.smp') for filename in glob(f'{resources_directory}/smps/*.smp')]
     hmm_pgap = hmm_pgap[hmm_pgap['source_identifier'].isin(smps)]
     hmm_pgap['taxonomic_range'] = hmm_pgap['taxonomic_range'].fillna(0.0).apply(
         lambda x: str(int(x)) if type(x) == float else x)
@@ -737,7 +751,7 @@ def taxonomic_workflow(
     taxids_with_db = check_tax_databases(
         f'{resources_directory}/smps', f'{resources_directory}/dbs', databases_prefixes[base], hmm_pgap_taxids,
         hmm_pgap)
-    check_regular_database(f'{resources_directory}/smps', resources_directory, databases_prefixes[base])  # for proteins with no taxonomy
+    check_regular_database(f'{resources_directory}/smps', f'{resources_directory}/dbs', databases_prefixes[base])  # for proteins with no taxonomy
     dbs = {taxid: [
         f'{resources_directory}/dbs/{databases_prefixes[base]}_{parent_taxid}' for parent_taxid in
         lineages[taxid] + ['0'] if parent_taxid in taxids_with_db] for taxid in lineages.keys()}
@@ -826,12 +840,74 @@ def organize_results(file, output, resources_directory, databases, hmm_pgap, cdd
     xlsx_report.save()
 
 
+def read_ecmap(fh):
+    enzymes = []
+    proteins = []
+    for line in fh:
+        items = line.split("\t")
+        m = re.compile("EC:[1-6\-].[0-9\-]+.[0-9\-]+.[0-9\-]+").search(items[2])
+        try:
+            ec = m.group().split(":")[1]
+        except AttributeError:
+            continue
+        member = f"{items[0]}.{items[1]}"
+        proteins.append(member)
+        enzymes.append(ec)
+    return enzymes, proteins
+
+
+def ecmap(ec_file):
+    with open(ec_file) as handler:
+        enzymes, proteins = read_ecmap(handler)
+    return enzymes, proteins
+
+
+def read_cogmap(cogmap_handler):
+    cogs = []
+    proteins = []
+    for line in cogmap_handler:
+        items = line.split("\t")
+        prots = items[-1].split(",")
+        cog = [items[1]] * len(prots)
+        cogs += cog
+        proteins += prots
+    return cogs, proteins
+
+
+def cogmap(file):
+    with open(file) as handler:
+        cogs, proteins = read_cogmap(handler)
+    return cogs, proteins
+
+
+def determine_cog2ec(map_df, frac=0.5):
+    # Group by cog and enzyme to get number of each EC assignment per cog
+    map_df_counts = map_df.groupby(["enzyme", "cog"]).count().reset_index()
+    map_df_counts.index = map_df_counts.cog
+    map_df_counts.drop("cog", axis=1, inplace=True)
+    map_df_counts.sort_index(inplace=True)
+    # Count total number of proteins per cog
+    cog_counts = map_df_counts.groupby(level=0).sum()
+    # Divide enzyme assignment number by total protein number to get fraction of each assignment
+    ecfrac = map_df_counts.protein.div(cog_counts.protein).reset_index()
+    # Get index of where fraction is above threshold
+    index = ecfrac.loc[ecfrac.protein >= frac].index
+    # Return mappings where fraction is above threshold
+    return map_df_counts.iloc[index]
+
+
+def generate_cog2ec_df(conversion, members, resources_directory):
+    enzymes, proteins = ecmap(conversion)
+    ecmap_df = pd.DataFrame(data={"enzyme": enzymes, "protein": proteins})
+    cogs, proteins = cogmap(members)
+    cogmap_df = pd.DataFrame(data={"cog": cogs, "protein": proteins})
+    map_df = pd.merge(ecmap_df, cogmap_df, left_on="protein", right_on="protein")
+    cog2ec_df = determine_cog2ec(map_df)
+    cog2ec_df.loc[:, "enzyme"].to_csv(f'{resources_directory}/cog2ec.tsv', sep="\t")
+
+
 def main():
     args = get_arguments()
-
-    if not os.path.isfile(f'{args.resources_directory}/recognizer_dwnl.timestamp') and not args.download_resources:
-        args.download_resources = str2bool(input(
-            'Resources seem to not have been downloaded for reCOGnizer yet. Do you want to download them? [Y/N] '))
 
     if not os.path.isfile(f'{args.resources_directory}/recognizer_dwnl.timestamp') and not args.download_resources:
         args.download_resources = str2bool(input(
@@ -873,7 +949,6 @@ def main():
                     args.output, args.resources_directory, args.threads, lineages, all_taxids, databases_prefixes,
                     base, db_hmm_pgap, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
             elif base in ['COG'] and args.tax_file is not None and args.species_taxids:
-                print('Gonna do COG taxonomic!')
                 cog_taxonomic_workflow(
                     args.output, args.resources_directory, args.threads, tax_file, args.tax_col, members_df,
                     max_target_seqs=args.max_target_seqs, evalue=args.evalue)
@@ -886,8 +961,13 @@ def main():
             args.file, args.output, args.resources_directory, args.databases, hmm_pgap, cddid, fun,
             no_output_sequences=args.no_output_sequences)
 
+        for directory in [f'{args.output}/{folder}' for folder in ['fasta', 'asn', 'blast', 'rpsbproc', 'tmp']]:
+            files = glob(f'{directory}/*')
+            for file in files:
+                os.remove(file)
+
 
 if __name__ == '__main__':
     start_time = time()
     main()
-    timed_message(f'reCOGnizer analysis finished in {strftime("%Hh%Mm%Ss", gmtime(time() - start_time))}')
+    timed_message(f'reCOGnizer analysis finished in {human_time(time() - start_time)}')
