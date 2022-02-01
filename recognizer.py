@@ -576,7 +576,7 @@ def check_regular_database(smp_directory, db_directory, db_prefix):
         print(f'A valid {db_prefix} split database was found!')
 
 
-def load_relational_tables(resources_directory):
+def load_relational_tables(resources_directory, tax_file=None):
     timed_message('Loading relational tables')
     cddid = parse_cddid(f'{resources_directory}/cddid_all.tbl')
     cddid['CDD ID'] = cddid['CDD ID'].apply(lambda x: f'CDD:{x}')
@@ -588,6 +588,8 @@ def load_relational_tables(resources_directory):
     hmm_pgap['taxonomic_range'] = hmm_pgap['taxonomic_range'].fillna(0.0).apply(
         lambda x: str(int(x)) if type(x) == float else x)
     fun = pd.read_csv(f'{sys.path[0]}/fun.tsv', sep='\t')
+    if tax_file is None:
+        return cddid, hmm_pgap, fun, None, None
     taxonomy_df = pd.read_csv(f'{resources_directory}/taxonomy.tsv', sep='\t', index_col='taxid',
                               dtype={'taxid': str, 'name': str, 'rank': str, 'parent_taxid': str})
     taxonomy_df['parent_taxid'] = taxonomy_df['parent_taxid'].fillna('0').apply(lambda x: x.split('.')[0])
@@ -926,7 +928,8 @@ def main():
     if not hasattr(args, "file"):
         exit('No input file specified. Exiting.')
 
-    cddid, hmm_pgap, fun, taxonomy_df, members_df = load_relational_tables(args.resources_directory)
+    cddid, hmm_pgap, fun, taxonomy_df, members_df = load_relational_tables(
+        args.resources_directory, tax_file=args.tax_file)
 
     if not args.keep_spaces:
         args.file = replace_spaces_with_commas(args.file, f'{args.output}/tmp')     # if alters input file, internally alters args.file

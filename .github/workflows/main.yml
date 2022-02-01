@@ -53,7 +53,7 @@ jobs:
         run: docker run recognizer /bin/bash -c "ls"
 
       - name: Taxonomy-free annotation
-        run: docker run recognizer /bin/bash -c "mkdir resources_directory; mv reCOGnizer/ci/cdd.tar.gz resources_directory; recognizer.py -f reCOGnizer/ci/proteomes.fasta -rd resources_directory --download-resources --quiet -sd"
+        run: docker run recognizer /bin/bash -c "mkdir resources_directory; mv reCOGnizer/ci/cdd.tar.gz resources_directory; recognizer.py -f reCOGnizer/ci/proteomes.fasta -rd resources_directory --download-resources --quiet -sd -t 2"
 
       - name: Taxonomy-based annotation
-        run: docker run recognizer /bin/bash -c "mkdir resources_directory; mv reCOGnizer/ci/cdd.tar.gz resources_directory; recognizer.py -f reCOGnizer/ci/proteomes.fasta -rd resources_directory --tax-file reCOGnizer/ci/UPIMAPI_results.tsv --tax-col 'Taxonomic lineage (SPECIES)' --protein-id-col qseqid --download-resources --quiet  -sd"
+        run: docker run recognizer /bin/bash -c "mkdir resources_directory; mv reCOGnizer/ci/cdd.tar.gz resources_directory; recognizer.py -f reCOGnizer/ci/proteomes.fasta -rd resources_directory --tax-file reCOGnizer/ci/UPIMAPI_results.tsv --tax-col 'Taxonomic lineage (SPECIES)' --protein-id-col qseqid --download-resources --quiet  -sd -t 2"
