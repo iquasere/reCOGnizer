@@ -24,7 +24,7 @@ from requests import get as requests_get
 import xml.etree.ElementTree as ET
 import re
 
-__version__ = '1.6.4'
+__version__ = '1.6.5'
 
 Entrez.email = "A.N.Other@example.com"
 
@@ -74,6 +74,9 @@ def get_arguments():
         help="Information from the alignment will be stored in their own columns.")
     parser.add_argument(
         "--quiet", action="store_true", default=False, help="Don't output download information, used mainly for CI.")
+    parser.add_argument(
+        "-sd", "--skip-downloaded", action="store_true", default=False,
+        help="Skip download of resources identified as already downloaded, used mainly for CI.")
     parser.add_argument('-v', '--version', action='version', version=f'reCOGnizer {__version__}')
 
     taxArguments = parser.add_argument_group('Taxonomy Arguments')
@@ -159,7 +162,7 @@ def get_tabular_taxonomy(output):
             written = f.write('\t'.join(info) + '\n')
 
 
-def download_resources(directory, quiet=False):
+def download_resources(directory, quiet=False, skip_downloaded=False):
     if not os.path.isdir(f'{directory}/smps'):
         Path(f'{directory}/smps').mkdir(parents=True, exist_ok=True)
         print(f'Created {directory}/smps')
@@ -190,8 +193,11 @@ def download_resources(directory, quiet=False):
         # KOG
         'https://ftp.ncbi.nlm.nih.gov/pub/COG/KOG/kog'
     ]:
-        if os.path.isfile(f"{directory}/{location.split('/')[-1].split('.gz')[0]}"):
-            download = str2bool(input(f"{directory}/{location.split('/')[-1]} exists. Overwrite? [Y/N] "))
+        if os.path.isfile(f"{directory}/{location.split('/')[-1]}"):
+            if not skip_downloaded:
+                download = str2bool(input(f"{directory}/{location.split('/')[-1]} exists. Overwrite? [Y/N] "))
+            else:
+                download = False
         else:
             download = True
         if download:
@@ -914,7 +920,8 @@ def main():
             'Resources seem to not have been downloaded for reCOGnizer yet. Do you want to download them? [Y/N] '))
 
     if args.download_resources:
-        download_resources(args.resources_directory, quiet=args.quiet)
+        download_resources(
+            args.resources_directory, quiet=args.quiet, skip_downloaded=args.skip_downloaded)
 
     if not hasattr(args, "file"):
         exit('No input file specified. Exiting.')
