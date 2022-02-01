@@ -394,9 +394,9 @@ def cog2ko(cogblast, cog2ko_ssv=f'{sys.path[0]}/resources_directory/cog2ko.ssv')
         web_locations = {
             'COG.mappings.v11.0.txt': 'https://stringdb-static.org/download/COG.mappings.v11.0.txt.gz',
             'protein.info.v11.0.txt': 'https://stringdb-static.org/download/protein.info.v11.0.txt.gz'}
-        for file in web_locations.keys():
+        for file, link in web_locations.items():
             if not os.path.isfile(f'{directory}/{file}'):
-                run_command(f'wget -P {directory} {web_locations[file]}')
+                run_command(f'wget -P {directory} {link} -q')
                 run_command(f'gunzip {directory}/{file}.gz')
         run_pipe_command(
             f"grep -E 'K[0-9]{5}$' {directory}/protein.info.v11.0.txt | awk '{{if (length($NF) == 6) print $1, $NF}}'",
