@@ -651,7 +651,7 @@ def parse_rpsbproc_section(handler, line, section_name, i):
 
 def parse_rpsbproc(file):
     file = open(file)
-    result = pd.DataFrame(columns=['DOMAINS', 'SUPERFAMILIES', 'SITES', 'MOTIFS'])
+    result = []
     try:
         line = [next(file) for i in range(3)][-1]
     except StopIteration:
@@ -672,12 +672,10 @@ def parse_rpsbproc(file):
                 superfamilies, line = parse_rpsbproc_section(file, line, 'SUPERFAMILIES', 3)
                 sites, line = parse_rpsbproc_section(file, line, 'SITES', 7)
                 motifs, line = parse_rpsbproc_section(file, line, 'MOTIFS', 5)
-            result = result.append(pd.DataFrame(
-                [[domains, superfamilies, sites, motifs]], columns=result.columns, index=[query]))
+            result.append([query, domains, superfamilies, sites, motifs])
             line = next(file)
         line = next(file)
-    result.reset_index(inplace=True)
-    result.columns = ['qseqid', 'sseqid'] + result.columns.tolist()[2:]
+    result = pd.DataFrame(result, columns=['qseqid', 'sseqid', 'Superfamilies', 'Sites', 'Motifs'])
     return result
 
 
