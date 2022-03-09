@@ -24,7 +24,7 @@ from requests import get as requests_get
 import xml.etree.ElementTree as ET
 import re
 
-__version__ = '1.6.5'
+__version__ = '1.6.6'
 
 Entrez.email = "A.N.Other@example.com"
 
@@ -698,11 +698,20 @@ def get_rpsbproc_info(rpsbproc_report):
         return pd.DataFrame(columns=['qseqid', 'sseqid', 'SUPERFAMILIES', 'SITES', 'MOTIFS'])
 
 
+def get_cdd_ec(description):
+    m = re.compile("EC:([1-6\-].[0-9\-]+.[0-9\-]+.[0-9\-]+)\)").search(description)
+    if m is None:
+        return np.nan
+    return m.group(1)
+
+
 def add_db_info(report, db, resources_directory, output, hmm_pgap, fun):
     if db in ['CDD', 'Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
         report = pd.merge(report, hmm_pgap, left_on='DB ID', right_on='source_identifier', how='left')
         report.columns = report.columns.tolist()[:-4] + [
             'Protein description', 'EC number', 'taxonomic_range', 'taxonomic_range_name']
+        if db == 'CDD':
+            report['EC number'] = report['DB description'].apply(get_cdd_ec)
     elif db == 'Smart':
         smart_table = pd.read_csv(
             f'{resources_directory}/descriptions.pl', sep='\t', skiprows=2, header=None, usecols=[1, 2])
