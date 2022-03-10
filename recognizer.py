@@ -710,6 +710,8 @@ def add_db_info(report, db, resources_directory, output, hmm_pgap, fun):
         report = pd.merge(report, hmm_pgap, left_on='DB ID', right_on='source_identifier', how='left')
         report.columns = report.columns.tolist()[:-4] + [
             'Protein description', 'EC number', 'taxonomic_range', 'taxonomic_range_name']
+        if db == 'CDD':
+            report['EC number'] = report['DB description'].apply(get_db_ec, suffix="\)")
     elif db == 'Smart':
         smart_table = pd.read_csv(
             f'{resources_directory}/descriptions.pl', sep='\t', skiprows=2, header=None, usecols=[1, 2])
@@ -717,6 +719,7 @@ def add_db_info(report, db, resources_directory, output, hmm_pgap, fun):
         smart_table['Smart ID'] = smart_table['Smart ID'].str.replace('SM', 'smart')
         report = pd.merge(report, smart_table, left_on='DB ID', right_on='Smart ID', how='left')
         report.columns = report.columns.tolist()[:-1] + ['Protein description']
+        report['EC number'] = report['DB description'].apply(get_db_ec)
     elif db == 'KOG':
         kog_table = parse_kog(f'{resources_directory}/kog')
         kog_table = pd.merge(kog_table, fun, left_on='KOG functional category (letter)',
@@ -737,10 +740,6 @@ def add_db_info(report, db, resources_directory, output, hmm_pgap, fun):
         write_cog_categories(report, f'{output}/COG')
     else:
         return 'Invalid database for retrieving further information!'
-    if db in ['CDD', 'Smart']:
-        del report['EC number']
-        suffix = '\)' if db == 'CDD' else ''
-        report['EC number'] = report['DB description'].apply(get_db_ec, suffix=suffix)
     return report
 
 
