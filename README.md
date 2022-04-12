@@ -104,4 +104,4 @@ required named arguments:
 
 ## Referencing reCOGnizer
 
-reCOGnizer is still not published. If you use it, please reference the bioconda package: https://anaconda.org/bioconda/recognizer
+If you use reCOGnizer, please cite its [publication](https://www.sciencedirect.com/science/article/pii/S2001037022001179).
