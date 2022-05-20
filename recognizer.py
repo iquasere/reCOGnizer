@@ -24,7 +24,7 @@ from requests import get as requests_get
 import xml.etree.ElementTree as ET
 import re
 
-__version__ = '1.7.0'
+__version__ = '1.7.1'
 
 Entrez.email = "A.N.Other@example.com"
 

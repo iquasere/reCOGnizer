@@ -6,7 +6,7 @@ channels:
 dependencies:
   - python
   - pandas
-  - blast =2.10.1
+  - blast
   - lxml
   - openpyxl
   - krona
