@@ -6,12 +6,12 @@ channels:
 dependencies:
   - python
   - pandas
-  - blast
+  - blast >=2.12
   - lxml
   - openpyxl
   - krona
   - wget
   - tqdm
   - xlsxwriter
-  - biopython =1.78
+  - biopython
   - requests

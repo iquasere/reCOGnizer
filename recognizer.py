@@ -24,7 +24,7 @@ from requests import get as requests_get
 import xml.etree.ElementTree as ET
 import re
 
-__version__ = '1.7.1'
+__version__ = '1.7.2'
 
 Entrez.email = "A.N.Other@example.com"
 
@@ -851,7 +851,7 @@ def organize_results(file, output, resources_directory, databases, hmm_pgap, cdd
         all_reports = pd.concat([all_reports, report])
         multi_sheet_excel(xlsx_report, report, sheet_name=db)
         i += 1
-        #clean_intermediates(output, db)
+        clean_intermediates(output, db)
     all_reports.sort_values(by=['qseqid', 'DB ID']).to_csv(f'{output}/reCOGnizer_results.tsv', sep='\t', index=False)
     xlsx_report.save()
 
