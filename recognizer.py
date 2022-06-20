@@ -727,7 +727,7 @@ def add_db_info(report, db, resources_directory, output, hmm_pgap, fun):
         cog_table = pd.merge(cog_table, fun, on='COG functional category (letter)', how='left')
         report = pd.merge(report, cog_table, left_on='DB ID', right_on='cog', how='left')
         # cog2ec
-        report = cog2ec(report, table=f'{resources_directory}/cog2ec.tsv', resources_dir=resources_directory)
+        report = cog2ec(report, table=f'{resources_directory}/cog2ec.tsv')
         # cog2ko
         report = cog2ko(report, cog2ko_ssv=f'{resources_directory}/cog2ko.tsv')
         report.columns = report.columns.tolist()[:-5] + ['Protein description'] + report.columns.tolist()[-4:]
