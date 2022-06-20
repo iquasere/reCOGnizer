@@ -13,5 +13,4 @@ dependencies:
   - wget
   - tqdm
   - xlsxwriter
-  - biopython
   - requests

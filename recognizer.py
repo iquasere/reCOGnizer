@@ -12,21 +12,18 @@ from glob import glob
 import os
 from pathlib import Path
 from shutil import which
-from subprocess import run, Popen, PIPE, check_output, DEVNULL
+from subprocess import run, Popen, PIPE, check_output
 import sys
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from multiprocessing import Pool, cpu_count, Manager
 from time import time, gmtime, strftime
-from Bio import Entrez, SeqIO
 from requests import get as requests_get
 import xml.etree.ElementTree as ET
 import re
 
-__version__ = '1.7.2'
-
-Entrez.email = "A.N.Other@example.com"
+__version__ = '1.7.3'
 
 default_print_command = False        # for debugging purposes
 
@@ -76,7 +73,11 @@ def get_arguments():
         "--quiet", action="store_true", default=False, help="Don't output download information, used mainly for CI.")
     parser.add_argument(
         "-sd", "--skip-downloaded", action="store_true", default=False,
-        help="Skip download of resources identified as already downloaded, used mainly for CI.")
+        help="Skip download of resources detected as already downloaded.")
+    parser.add_argument(
+        "--keep-intermediates", default=False, action='store_true',
+        help="Keep intermediate annotation files generated in reCOGnizer's workflow, "
+             "i.e., ASN, RPSBPROC and BLAST reports and split FASTA inputs.")
     parser.add_argument('-v', '--version', action='version', version=f'reCOGnizer {__version__}')
 
     taxArguments = parser.add_argument_group('Taxonomy Arguments')
@@ -100,7 +101,7 @@ def get_arguments():
     args.resources_directory = args.resources_directory.rstrip('/')
 
     if hasattr(args, "file"):
-        for directory in [f'{args.output}/{folder}' for folder in ['fasta', 'asn', 'blast', 'rpsbproc', 'tmp']] + [
+        for directory in [f'{args.output}/{folder}' for folder in ['asn', 'blast', 'rpsbproc', 'tmp']] + [
                 f'{args.resources_directory}/dbs']:
             if not os.path.isdir(directory):
                 Path(directory).mkdir(parents=True, exist_ok=True)
@@ -182,8 +183,6 @@ def download_resources(directory, quiet=False, skip_downloaded=False):
         'ftp.ncbi.nlm.nih.gov/pub/COG/COG2020/data/fun-20.tab',
         'ftp.ncbi.nlm.nih.gov/pub/COG/COG2020/data/cog-20.def.tab',
         # COG2EC
-        'https://bitbucket.org/scilifelab-lts/lts-workflows-sm-metagenomics/raw/screening_legacy/'
-        'lts_workflows_sm_metagenomics/source/utils/cog2ec.py',
         'http://eggnogdb.embl.de/download/eggnog_4.5/eggnog4.protein_id_conversion.tsv.gz',
         'http://eggnogdb.embl.de/download/eggnog_4.5/data/NOG/NOG.members.tsv.gz',
         # NCBIfam, TIGRFAM, Pfam, PRK (protein clusters)
@@ -334,7 +333,7 @@ def get_lineages(taxids, taxonomy_df):
 
 
 def get_lineages_multiprocessing(taxids, taxonomy_df, threads=14):
-    timed_message(f'Listing all parent tax IDs for {len(taxids)} tax IDs (this may take a while, time for coffee?)')
+    timed_message(f'Listing all parent tax IDs for {len(taxids)} tax IDs using {threads} threads')
     taxids_groups = split(list(taxids), threads)
     lineages, res_taxids = ({}, [])
     with Manager() as m:
@@ -379,12 +378,7 @@ def is_db_good(database, print_warning=True):
     return True
 
 
-def cog2ec(
-        cogblast, table=f'{sys.path[0]}/resources_directory/cog2ec.tsv',
-        resources_dir=f'{sys.path[0]}/resources_directory'):
-    if not os.path.isfile(table):
-        run_command('python {0}/cog2ec.py -c {0}/eggnog4.protein_id_conversion.tsv -m {0}/NOG.members.tsv'.format(
-            resources_dir), stdout=open(table, 'w'))
+def cog2ec(cogblast, table=f'{sys.path[0]}/resources_directory/cog2ec.tsv'):
     return pd.merge(cogblast, pd.read_csv(table, sep='\t', names=['cog', 'EC number']), on='cog', how='left')
 
 
@@ -478,7 +472,7 @@ def split_fasta_by_taxid(file, tax_file, protein_id_col, tax_col, output):
     for col in [protein_id_col, 'index']:
         cols.remove(col)
     fastas = fastas.groupby(protein_id_col)[cols].first()
-    for taxid in tqdm(set(tax_file[tax_col].tolist()), desc=f'Splitting sequences by taxon'):
+    for taxid in tqdm(set(tax_file[tax_col].tolist()), desc=f'Splitting sequences by taxa'):
         write_fasta(
             fastas[fastas[tax_col] == taxid].reset_index()[[protein_id_col, 'sequence']],
             f'{output}/tmp/{taxid}.fasta', protein_id_col)
@@ -598,8 +592,8 @@ def load_relational_tables(resources_directory, tax_file=None):
     return cddid, hmm_pgap, fun, taxonomy_df, members_df
 
 
-def replace_spaces_with_commas(file, tmp_dir):
-    timed_message('Replacing spaces for commas')
+def replace_spaces_with_underscores(file, tmp_dir):
+    timed_message('Replacing spaces with underscores')
     run_pipe_command(f"sed -e 's/ /_/g' {file} > {tmp_dir}/tmp.fasta")
     return f'{tmp_dir}/tmp.fasta'
 
@@ -726,7 +720,8 @@ def add_db_info(report, db, resources_directory, output, hmm_pgap, fun):
                              right_on='COG functional category (letter)', how='left')
         report = pd.merge(report, kog_table, left_on='DB ID', right_on='kog', how='left')
         report.columns = report.columns.tolist()[:-4] + ['Protein description'] + report.columns.tolist()[-3:]
-        write_cog_categories(report, f'{output}/KOG')
+        if len(report) > 0:
+            write_cog_categories(report, f'{output}/KOG')
     elif db == 'COG':
         cog_table = parse_whog(f'{resources_directory}/cog-20.def.tab')
         cog_table = pd.merge(cog_table, fun, on='COG functional category (letter)', how='left')
@@ -737,7 +732,8 @@ def add_db_info(report, db, resources_directory, output, hmm_pgap, fun):
         report = cog2ko(report, cog2ko_ssv=f'{resources_directory}/cog2ko.tsv')
         report.columns = report.columns.tolist()[:-5] + ['Protein description'] + report.columns.tolist()[-4:]
         report.to_csv(f'{output}/COG_report.tsv', sep='\t', index=False)
-        write_cog_categories(report, f'{output}/COG')
+        if len(report) > 0:
+            write_cog_categories(report, f'{output}/COG')
     else:
         return 'Invalid database for retrieving further information!'
     return report
@@ -754,7 +750,7 @@ def custom_database_workflow(file, output, threads, max_target_seqs, evalue, dat
         file, f'{output}/aligned.blast', ' '.join(dbs), threads=threads, max_target_seqs=max_target_seqs, evalue=evalue)
 
 
-def clean_intermediates(output, base):
+def remove_intermediates(output, base):
     for report in ['asn', 'blast', 'rpsbproc']:
         run_pipe_command(f'rm {output}/{report}/{base}_*_aligned.{report}')
 
@@ -796,7 +792,7 @@ def taxonomic_workflow(
                 if os.path.isfile(f'{output}/rpsbproc/{base}_{taxid}_{i}_aligned.rpsbproc'):
                     rpsbproc_report = get_rpsbproc_info(f'{output}/rpsbproc/{base}_{taxid}_{i}_aligned.rpsbproc')
                     if len(rpsbproc_report) > 0:
-                        db_report = db_report.append(rpsbproc_report)
+                        db_report = pd.concat([db_report, rpsbproc_report], axis=1)
     db_report.to_csv(f'{output}/{base}_report.tsv', sep='\t')
 
 
@@ -851,7 +847,7 @@ def organize_results(file, output, resources_directory, databases, hmm_pgap, cdd
         all_reports = pd.concat([all_reports, report])
         multi_sheet_excel(xlsx_report, report, sheet_name=db)
         i += 1
-        clean_intermediates(output, db)
+        remove_intermediates(output, db)
     all_reports.sort_values(by=['qseqid', 'DB ID']).to_csv(f'{output}/reCOGnizer_results.tsv', sep='\t', index=False)
     xlsx_report.save()
 
@@ -940,7 +936,7 @@ def main():
         args.resources_directory, tax_file=args.tax_file)
 
     if not args.keep_spaces:
-        args.file = replace_spaces_with_commas(args.file, f'{args.output}/tmp')     # if alters input file, internally alters args.file
+        args.file = replace_spaces_with_underscores(args.file, f'{args.output}/tmp')     # if alters input file, internally alters args.file
 
     if args.database:  # if user database was inputted
         custom_database_workflow(
@@ -951,7 +947,7 @@ def main():
                 args.tax_file, args.protein_id_col, args.tax_col, taxonomy_df)
             split_fasta_by_taxid(args.file, tax_file, args.protein_id_col, args.tax_col, args.output)
             # split FASTA for multiprocessing
-            for taxid in tqdm(lineages.keys(), desc=timed_message('Splitting FASTA')):
+            for taxid in tqdm(lineages.keys(), desc=timed_message('Splitting FASTAs')):
                 if os.path.isfile(f'{args.output}/tmp/{taxid}.fasta'):
                     split_fasta_by_threads(
                         f'{args.output}/tmp/{taxid}.fasta', f'{args.output}/tmp/tmp_{taxid}', args.threads)
@@ -979,10 +975,11 @@ def main():
             args.file, args.output, args.resources_directory, args.databases, hmm_pgap, cddid, fun,
             no_output_sequences=args.no_output_sequences)
 
-        for directory in [f'{args.output}/{folder}' for folder in ['fasta', 'asn', 'blast', 'rpsbproc', 'tmp']]:
-            files = glob(f'{directory}/*')
-            for file in files:
-                os.remove(file)
+        if not args.keep_intermediates:
+            for directory in [f'{args.output}/{folder}' for folder in ['asn', 'blast', 'rpsbproc', 'tmp']]:
+                files = glob(f'{directory}/*')
+                for file in files:
+                    os.remove(file)
 
 
 if __name__ == '__main__':
