@@ -23,7 +23,7 @@ from requests import get as requests_get
 import xml.etree.ElementTree as ET
 import re
 
-__version__ = '1.7.3'
+__version__ = '1.8.0'
 
 default_print_command = False        # for debugging purposes
 
@@ -48,10 +48,8 @@ def get_arguments():
         "-rd", "--resources-directory", default=os.path.expanduser('~/recognizer_resources'),
         help="Output directory for storing databases and other resources [~/recognizer_resources]")
     parser.add_argument(
-        "-dbs", "--databases", nargs='+',
-        choices=["CDD", "Pfam", "NCBIfam", "Protein_Clusters", "Smart", "TIGRFAM", "COG", "KOG"],
-        default=["CDD", "Pfam", "NCBIfam", "Protein_Clusters", "Smart", "TIGRFAM", "COG", "KOG"],
-        help="Databases to include in functional annotation [all available]")
+        "-dbs", "--databases", default="CDD,Pfam,NCBIfam,Protein_Clusters,Smart,TIGRFAM,COG,KOG",
+        help="Databases to include in functional annotation (comma-separated) [all available]")
     parser.add_argument(
         "-db", "--database",
         help="Basename of database for annotation. If multiple databases, use comma separated list (db1,db2,db3)")
@@ -99,6 +97,7 @@ def get_arguments():
 
     args.output = args.output.rstrip('/')
     args.resources_directory = args.resources_directory.rstrip('/')
+    args.databases = args.databases.split(',')
 
     if hasattr(args, "file"):
         for directory in [f'{args.output}/{folder}' for folder in ['asn', 'blast', 'rpsbproc', 'tmp']] + [
@@ -257,9 +256,9 @@ def parse_cddid(cddid):
     return cddid
 
 
-def expand_by_list_column(df, column='COG functional category (letter)'):
+def expand_by_list_column(df, column='Functional category (letter)'):
     lens = [len(item) for item in df[column]]
-    dictionary = dict()
+    dictionary = {}
     for col in df.columns:
         dictionary[col] = np.repeat(df[col].values, lens)
     dictionary[column] = np.concatenate(df[column].values)
@@ -268,21 +267,21 @@ def expand_by_list_column(df, column='COG functional category (letter)'):
 
 def parse_whog(whog):
     df = pd.read_csv(whog, sep='\t', usecols=[0, 1, 2], header=None, encoding='ISO 8859-1')
-    df.columns = ['cog', 'COG functional category (letter)', 'COG protein description']
-    df['COG functional category (letter)'] = df['COG functional category (letter)'].apply(lambda x: [i for i in x])
-    df = expand_by_list_column(df, column='COG functional category (letter)')
+    df.columns = ['DB ID', 'Functional category (letter)', 'product_name']
+    df['Functional category (letter)'] = df['Functional category (letter)'].apply(lambda x: [i for i in x])
+    df = expand_by_list_column(df, column='Functional category (letter)')
     return df
 
 
 def parse_kog(kog):
-    lines = list()
+    lines = []
     for line in [line.rstrip('\n') for line in open(kog).readlines() if line.startswith('[')]:
         line = line.split()
         lines.append([line[0][1], line[1], ' '.join(line[2:])])
     df = pd.DataFrame(lines)
-    df.columns = ['KOG functional category (letter)', 'kog', 'KOG protein description']
-    df['KOG functional category (letter)'] = df['KOG functional category (letter)'].apply(lambda x: [i for i in x])
-    df = expand_by_list_column(df, column='KOG functional category (letter)')
+    df.columns = ['Functional category (letter)', 'DB ID', 'product_name']
+    df['Functional category (letter)'] = df['Functional category (letter)'].apply(lambda x: [i for i in x])
+    df = expand_by_list_column(df, column='Functional category (letter)')
     return df
 
 
@@ -354,7 +353,7 @@ def create_tax_db(smp_directory, db_directory, db_prefix, taxids, hmm_pgap):
     :param taxids: (list) - list of tax ids present in the dataset lacking db
     :param hmm_pgap: (pandas.DataFrame) - df with the information from the hmm_GAP.tsv file
     """
-    taxids_with_db = list()
+    taxids_with_db = []
     if len(taxids) == 0:
         return []
     for taxid in tqdm(taxids, desc=f'Organizing PN files for [{len(taxids)}] Tax IDs.'):
@@ -379,11 +378,12 @@ def is_db_good(database, print_warning=True):
 
 
 def cog2ec(cogblast, table=f'{sys.path[0]}/resources_directory/cog2ec.tsv'):
-    return pd.merge(cogblast, pd.read_csv(table, sep='\t', names=['cog', 'EC number']), on='cog', how='left')
+    return pd.merge(cogblast, pd.read_csv(table, sep='\t', names=['DB ID', 'ec_number']), on='DB ID', how='left')
 
 
 def cog2ko(cogblast, cog2ko_ssv=f'{sys.path[0]}/resources_directory/cog2ko.ssv'):
     if not os.path.isfile(cog2ko_ssv):
+        print('cog2ko not found! Going to build it')
         directory = '/'.join(cog2ko_ssv.split('/')[:-1])
         web_locations = {
             'COG.mappings.v11.0.txt': 'https://stringdb-static.org/download/COG.mappings.v11.0.txt.gz',
@@ -393,15 +393,15 @@ def cog2ko(cogblast, cog2ko_ssv=f'{sys.path[0]}/resources_directory/cog2ko.ssv')
                 run_command(f'wget -P {directory} {link} -q')
                 run_command(f'gunzip {directory}/{file}.gz')
         run_pipe_command(
-            f"grep -E 'K[0-9]{5}$' {directory}/protein.info.v11.0.txt | awk '{{if (length($NF) == 6) print $1, $NF}}'",
+            f"grep -E 'K[0-9]{{5}}$' {directory}/protein.info.v11.0.txt | awk '{{if (length($NF) == 6) print $1, $NF}}'",
             file=f'{directory}/string2ko.tsv')
         run_pipe_command(
             """awk '{{if (length($4) == 7) print $1"\t"$4}}' {0}/COG.mappings.v11.0.txt | sort | 
             join - {0}/string2ko.tsv""".format(directory), file=f'{directory}/cog2ko.ssv')
         df = pd.read_csv(f'{directory}/cog2ko.ssv', sep=' ', names=['StringDB', 'COG', 'KO'])
         df[['COG', 'KO']].groupby('COG')['KO'].agg([('KO', ','.join)]).reset_index().to_csv(
-            f'{directory}/cog2ko.tsv', sep='\t', index=False, header=['cog', 'KO'])
-    return pd.merge(cogblast, pd.read_csv(cog2ko_ssv, sep='\t'), on='cog', how='left')
+            f'{directory}/cog2ko.tsv', sep='\t', index=False, header=['DB ID', 'KO'])
+    return pd.merge(cogblast, pd.read_csv(cog2ko_ssv, sep='\t'), on='DB ID', how='left')
 
 
 def write_table(table, output, out_format='excel', header=True):
@@ -431,7 +431,7 @@ def create_krona_plot(tsv, output=None, print_command=False):
 def write_cog_categories(data, output_basename):
     # COG categories quantification
     data = data.groupby(
-        ['COG general functional category', 'COG functional category', 'Protein description', 'DB ID']
+        ['General functional category', 'Functional category', 'product_name', 'DB ID']
     ).size().reset_index().rename(columns={0: 'count'})
     data[['count'] + data.columns.tolist()[:-1]].to_csv(
         f'{output_basename}_quantification.tsv', sep='\t', index=False, header=None)
@@ -445,7 +445,7 @@ def count_on_file(expression, file, compressed=False):
 def parse_fasta_on_memory(file):
     lines = [line.rstrip('\n') for line in open(file)]
     i = 0
-    result = dict()
+    result = {}
     while i < len(lines):
         if lines[i].startswith('>'):
             name = lines[i][1:].split()[0]
@@ -524,7 +524,7 @@ def cog_taxonomic_workflow(
     check_cog_tax_database(f'{resources_directory}/smps', f'{resources_directory}/dbs')  # for proteins with no taxonomy
     members_df.index = members_df.index.astype(str)
     members_taxids = members_df.index.tolist()
-    db_report = pd.DataFrame(columns=['qseqid', 'sseqid', 'SUPERFAMILIES', 'SITES', 'MOTIFS'])
+    db_report = pd.DataFrame(columns=['qseqid', 'sseqid', 'Superfamilies', 'Sites', 'Motifs'])
     for taxid in set(tax_file[tax_col].tolist()):
         # Run RPS-BLAST
         if taxid not in members_taxids:
@@ -555,8 +555,8 @@ def cog_taxonomic_workflow(
             if os.path.isfile(f'{output}/rpsbproc/COG_{taxid}_{i}_aligned.rpsbproc'):
                 rpsbproc_report = get_rpsbproc_info(f'{output}/rpsbproc/COG_{taxid}_{i}_aligned.rpsbproc')
                 if len(rpsbproc_report) > 0:
-                    db_report = db_report.append(rpsbproc_report)
-    db_report.to_csv(f'{output}/COG_report.tsv', sep='\t')
+                    db_report = pd.concat([db_report, rpsbproc_report])
+    db_report.to_csv(f'{output}/rpsbproc/COG_report.tsv', sep='\t')
 
 
 def check_regular_database(smp_directory, db_directory, db_prefix):
@@ -633,7 +633,7 @@ def run_rpsbproc(asn_report, resources_directory, evalue):
 
 
 def parse_rpsbproc_section(handler, line, section_name, i):
-    data = list()
+    data = []
     if line.startswith(section_name):
         line = next(handler)
         while not line.startswith(f'END{section_name}'):
@@ -679,7 +679,7 @@ def run_blast_formatter(archive, output, outfmt='6'):
 
 def get_rpsbproc_info(rpsbproc_report):
     if not os.path.isfile(rpsbproc_report):
-        return pd.DataFrame(columns=['qseqid', 'sseqid', 'SUPERFAMILIES', 'SITES', 'MOTIFS'])
+        return pd.DataFrame(columns=['qseqid', 'sseqid', 'Superfamilies', 'Sites', 'Motifs'])
     rpsbproc_report = parse_rpsbproc(rpsbproc_report)
     if len(rpsbproc_report) > 0:
         for col in rpsbproc_report.columns.tolist()[2:]:  # exclude 'qseqid' and 'sseqid'
@@ -689,7 +689,7 @@ def get_rpsbproc_info(rpsbproc_report):
         rpsbproc_report.sseqid = rpsbproc_report.sseqid.apply(lambda x: f'CDD:{x}')
         return rpsbproc_report
     else:
-        return pd.DataFrame(columns=['qseqid', 'sseqid', 'SUPERFAMILIES', 'SITES', 'MOTIFS'])
+        return pd.DataFrame(columns=['qseqid', 'sseqid', 'Superfamilies', 'Sites', 'Motifs'])
 
 
 def get_db_ec(description, suffix=''):
@@ -699,44 +699,41 @@ def get_db_ec(description, suffix=''):
     return m.group(1)
 
 
-def add_db_info(report, db, resources_directory, output, hmm_pgap, fun):
+def complete_report(report, db, resources_directory, output, hmm_pgap, fun):
+    cols = ['qseqid', 'DB ID', 'product_name', 'DB description', 'ec_number', 'KO', 'CDD ID', 'taxonomic_range_name',
+            'taxonomic_range', 'Superfamilies', 'Sites', 'Motifs',  'pident', 'length', 'mismatch', 'gapopen',
+            'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore']
     if db in ['CDD', 'Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
         report = pd.merge(report, hmm_pgap, left_on='DB ID', right_on='source_identifier', how='left')
-        report.columns = report.columns.tolist()[:-4] + [
-            'Protein description', 'EC number', 'taxonomic_range', 'taxonomic_range_name']
         if db == 'CDD':
-            report['EC number'] = report['DB description'].apply(get_db_ec, suffix="\)")
+            report['ec_number'] = report['DB description'].apply(get_db_ec, suffix="\)")
     elif db == 'Smart':
         smart_table = pd.read_csv(
-            f'{resources_directory}/descriptions.pl', sep='\t', skiprows=2, header=None, usecols=[1, 2])
-        smart_table.columns = ['Smart ID', 'Smart description']
-        smart_table['Smart ID'] = smart_table['Smart ID'].str.replace('SM', 'smart')
-        report = pd.merge(report, smart_table, left_on='DB ID', right_on='Smart ID', how='left')
-        report.columns = report.columns.tolist()[:-1] + ['Protein description']
-        report['EC number'] = report['DB description'].apply(get_db_ec)
+            f'{resources_directory}/descriptions.pl', sep='\t', skiprows=2, names=['DB ID', 'product_name'],
+            usecols=[1, 2])
+        smart_table['DB ID'] = smart_table['DB ID'].str.replace('SM', 'smart')
+        report = pd.merge(report, smart_table, on='DB ID', how='left')
+        report['ec_number'] = report['DB description'].apply(get_db_ec)
     elif db == 'KOG':
         kog_table = parse_kog(f'{resources_directory}/kog')
-        kog_table = pd.merge(kog_table, fun, left_on='KOG functional category (letter)',
-                             right_on='COG functional category (letter)', how='left')
-        report = pd.merge(report, kog_table, left_on='DB ID', right_on='kog', how='left')
-        report.columns = report.columns.tolist()[:-4] + ['Protein description'] + report.columns.tolist()[-3:]
+        kog_table = pd.merge(kog_table, fun, on='Functional category (letter)', how='left')
+        report = pd.merge(report, kog_table, on='DB ID', how='left')
         if len(report) > 0:
             write_cog_categories(report, f'{output}/KOG')
     elif db == 'COG':
         cog_table = parse_whog(f'{resources_directory}/cog-20.def.tab')
-        cog_table = pd.merge(cog_table, fun, on='COG functional category (letter)', how='left')
-        report = pd.merge(report, cog_table, left_on='DB ID', right_on='cog', how='left')
+        cog_table = pd.merge(cog_table, fun, on='Functional category (letter)', how='left')
+        report = pd.merge(report, cog_table, on='DB ID', how='left')
         # cog2ec
         report = cog2ec(report, table=f'{resources_directory}/cog2ec.tsv')
         # cog2ko
         report = cog2ko(report, cog2ko_ssv=f'{resources_directory}/cog2ko.tsv')
-        report.columns = report.columns.tolist()[:-5] + ['Protein description'] + report.columns.tolist()[-4:]
-        report.to_csv(f'{output}/COG_report.tsv', sep='\t', index=False)
         if len(report) > 0:
             write_cog_categories(report, f'{output}/COG')
     else:
         return 'Invalid database for retrieving further information!'
-    return report
+    cols = [col for col in cols if col in report.columns]
+    return report[cols].rename(columns={'product_name': 'Protein description', 'ec_number': 'EC number'})
 
 
 def custom_database_workflow(file, output, threads, max_target_seqs, evalue, database):
@@ -748,11 +745,6 @@ def custom_database_workflow(file, output, threads, max_target_seqs, evalue, dat
     timed_message('Running annotation with RPS-BLAST and inputted database as reference.')
     run_rpsblast(
         file, f'{output}/aligned.blast', ' '.join(dbs), threads=threads, max_target_seqs=max_target_seqs, evalue=evalue)
-
-
-def remove_intermediates(output, base):
-    for report in ['asn', 'blast', 'rpsbproc']:
-        run_pipe_command(f'rm {output}/{report}/{base}_*_aligned.{report}')
 
 
 def taxonomic_workflow(
@@ -768,7 +760,7 @@ def taxonomic_workflow(
         f'{resources_directory}/dbs/{databases_prefixes[base]}_{parent_taxid}' for parent_taxid in
         lineages[taxid] + ['0'] if parent_taxid in taxids_with_db] for taxid in lineages.keys()}
     dbs = {**dbs, **{'0': [f'{resources_directory}/dbs/{databases_prefixes[base]}']}}       # no taxonomy is annotated with all
-    db_report = pd.DataFrame(columns=['qseqid', 'sseqid', 'SUPERFAMILIES', 'SITES', 'MOTIFS'])
+    db_report = pd.DataFrame(columns=['qseqid', 'sseqid', 'Superfamilies', 'Sites', 'Motifs'])
     for taxid in list(lineages.keys()) + ['0']:
         if os.path.isfile(f'{output}/tmp/{taxid}.fasta'):
             # Run RPS-BLAST
@@ -792,8 +784,8 @@ def taxonomic_workflow(
                 if os.path.isfile(f'{output}/rpsbproc/{base}_{taxid}_{i}_aligned.rpsbproc'):
                     rpsbproc_report = get_rpsbproc_info(f'{output}/rpsbproc/{base}_{taxid}_{i}_aligned.rpsbproc')
                     if len(rpsbproc_report) > 0:
-                        db_report = pd.concat([db_report, rpsbproc_report], axis=1)
-    db_report.to_csv(f'{output}/{base}_report.tsv', sep='\t')
+                        db_report = pd.concat([db_report, rpsbproc_report])
+    db_report.to_csv(f'{output}/rpsbproc/{base}_report.tsv', sep='\t')
 
 
 def multiprocess_workflow(
@@ -817,13 +809,13 @@ def multiprocess_workflow(
         p.starmap(run_rpsbproc, [(
             f'{output}/asn/{base}_{i}_aligned.asn', resources_directory, evalue) for i in range(threads)
             if os.path.isfile(f'{output}/asn/{base}_{i}_aligned.asn')])
-    db_report = pd.DataFrame(columns=['qseqid', 'sseqid', 'SUPERFAMILIES', 'SITES', 'MOTIFS'])
+    db_report = pd.DataFrame(columns=['qseqid', 'sseqid', 'Superfamilies', 'Sites', 'Motifs'])
     for i in range(threads):
         if os.path.isfile(f'{output}/rpsbproc/{base}_{i}_aligned.rpsbproc'):
             rpsbproc_report = get_rpsbproc_info(f'{output}/rpsbproc/{base}_{i}_aligned.rpsbproc')
             if len(rpsbproc_report) > 0:
-                db_report = db_report.append(rpsbproc_report)
-    db_report.to_csv(f'{output}/{base}_report.tsv', sep='\t')
+                db_report = pd.concat([db_report, rpsbproc_report])
+    db_report.to_csv(f'{output}/rpsbproc/{base}_report.tsv', sep='\t')
 
 
 def organize_results(file, output, resources_directory, databases, hmm_pgap, cddid, fun, no_output_sequences=False):
@@ -834,20 +826,18 @@ def organize_results(file, output, resources_directory, databases, hmm_pgap, cdd
     for db in databases:
         run_pipe_command(f'cat {output}/blast/{db}_*_aligned.blast', file=f'{output}/blast/{db}_aligned.blast')
         print(f'[{i}/{len(databases)}] Handling {db} annotation')
-        report = pd.read_csv(f'{output}/{db}_report.tsv', sep='\t', index_col=0)
+        report = pd.read_csv(f'{output}/rpsbproc/{db}_report.tsv', sep='\t', index_col=0)
         report = pd.merge(
             report, parse_blast(f'{output}/blast/{db}_aligned.blast'), on=['qseqid', 'sseqid'], how='left')
         report = pd.merge(report, cddid, left_on='sseqid', right_on='CDD ID', how='left')
-        del report['CDD ID']
         if not no_output_sequences:
             report = add_sequences(file, report)        # adding protein sequences if requested
-        report = add_db_info(report, db, resources_directory, output, hmm_pgap, fun)
-        report = report.drop_duplicates()
-        # report = report[report['pident'] > pident]  # filter matches by pident - seems no longer implementable after rpsbproc integration
+        report = complete_report(report, db, resources_directory, output, hmm_pgap, fun)
+        report.drop_duplicates(inplace=True)
+        report.to_csv(f'{output}/{db}_report.tsv', sep='\t', index=False)
         all_reports = pd.concat([all_reports, report])
         multi_sheet_excel(xlsx_report, report, sheet_name=db)
         i += 1
-        remove_intermediates(output, db)
     all_reports.sort_values(by=['qseqid', 'DB ID']).to_csv(f'{output}/reCOGnizer_results.tsv', sep='\t', index=False)
     xlsx_report.save()
 
@@ -970,11 +960,9 @@ def main():
                 multiprocess_workflow(
                     args.output, args.resources_directory, args.threads, databases_prefixes, base,
                     max_target_seqs=args.max_target_seqs, evalue=args.evalue)
-
         organize_results(
             args.file, args.output, args.resources_directory, args.databases, hmm_pgap, cddid, fun,
             no_output_sequences=args.no_output_sequences)
-
         if not args.keep_intermediates:
             for directory in [f'{args.output}/{folder}' for folder in ['asn', 'blast', 'rpsbproc', 'tmp']]:
                 files = glob(f'{directory}/*')
