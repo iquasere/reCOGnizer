@@ -1,5 +1,5 @@
 {% set name = "recognizer" %}
-{% set version = "1.5.0" %}
+{% set version = "1.8.0" %}
 {% set sha256 = "aea5ac40e5b58490c913aa0a1f6d205d54e80e11aa692b40d1fc5c59a5dbe978" %}
 
 package:
@@ -18,15 +18,15 @@ requirements:
   run:
     - python
     - pandas
-    - blast =2.10.1
+    - blast >=2.12
     - lxml
     - openpyxl
     - krona
     - wget
     - tqdm
     - xlsxwriter
-    - biopython =1.78
     - requests
+    - pyyaml
 
 test:
   commands:

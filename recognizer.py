@@ -23,7 +23,7 @@ from requests import get as requests_get
 import xml.etree.ElementTree as ET
 import re
 
-__version__ = '1.8.0'
+__version__ = '1.8.1'
 
 default_print_command = False        # for debugging purposes
 
@@ -298,7 +298,8 @@ def parse_blast(file):
 
 
 def pn2database(pn):
-    run_command(f"makeprofiledb -in {pn} -title {pn.split('.pn')[0]} -out {pn.split('.pn')[0]}")
+    if not is_db_good(f"{pn.rstrip('.pn')}.00"):
+        run_command(f"makeprofiledb -in {pn} -title {pn.rstrip('.pn')} -out {pn.rstrip('.pn')}")
 
 
 def split(a, n):
@@ -727,7 +728,7 @@ def complete_report(report, db, resources_directory, output, hmm_pgap, fun):
         # cog2ec
         report = cog2ec(report, table=f'{resources_directory}/cog2ec.tsv')
         # cog2ko
-        report = cog2ko(report, cog2ko_ssv=f'{resources_directory}/cog2ko.tsv')
+        #report = cog2ko(report, cog2ko_ssv=f'{resources_directory}/cog2ko.tsv')    # TODO - this requires fixing
         if len(report) > 0:
             write_cog_categories(report, f'{output}/COG')
     else:
