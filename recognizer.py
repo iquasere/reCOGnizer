@@ -34,8 +34,8 @@ def get_arguments():
         epilog="Input file must be specified.")
     parser.add_argument("-f", "--file", help="Fasta file with protein sequences for annotation")
     parser.add_argument(
-        "-t", "--threads", type=int, default=cpu_count() - 2,
-        help="Number of threads for reCOGnizer to use [max available - 2]")
+        "-t", "--threads", type=int, default=cpu_count() - 1,
+        help="Number of threads for reCOGnizer to use [max available - 1]")
     parser.add_argument("--evalue", type=float, default=1e-3, help="Maximum e-value to report annotations for [1e-2]")
     parser.add_argument(
         "--pident", type=float, default=0.0, help="[DEPRECATED] Minimum pident to report annotations for [0]")
