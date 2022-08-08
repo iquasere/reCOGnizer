@@ -298,8 +298,7 @@ def parse_blast(file):
 
 
 def pn2database(pn):
-    if not is_db_good(f"{pn.rstrip('.pn')}.00"):
-        run_command(f"makeprofiledb -in {pn} -title {pn.rstrip('.pn')} -out {pn.rstrip('.pn')}")
+    run_command(f"makeprofiledb -in {pn} -title {pn.rstrip('.pn')} -out {pn.rstrip('.pn')} -max_smp_vol 1000000")
 
 
 def split(a, n):
@@ -372,7 +371,7 @@ def is_db_good(database, print_warning=True):
     for ext in ['aux', 'freq', 'loo', 'pdb', 'phr', 'pin', 'pos', 'pot', 'psq', 'ptf', 'pto', 'rps']:
         if not os.path.isfile(f'{database}.{ext}'):
             if print_warning:
-                print(f'{database}.{ext} not found! Rebuilding database...')
+                print(f'{database}.{ext} not found!')
             return False
     #print(f'{database} seems good!')
     return True
@@ -756,7 +755,8 @@ def taxonomic_workflow(
     taxids_with_db = check_tax_databases(
         f'{resources_directory}/smps', f'{resources_directory}/dbs', databases_prefixes[base], hmm_pgap_taxids,
         hmm_pgap)
-    check_regular_database(f'{resources_directory}/smps', f'{resources_directory}/dbs', databases_prefixes[base])  # for proteins with no taxonomy
+    # for proteins with no taxonomy
+    check_regular_database(f'{resources_directory}/smps', f'{resources_directory}/dbs', databases_prefixes[base])
     dbs = {taxid: [
         f'{resources_directory}/dbs/{databases_prefixes[base]}_{parent_taxid}' for parent_taxid in
         lineages[taxid] + ['0'] if parent_taxid in taxids_with_db] for taxid in lineages.keys()}
