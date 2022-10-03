@@ -23,7 +23,7 @@ from requests import get as requests_get
 import xml.etree.ElementTree as ET
 import re
 
-__version__ = '1.8.1'
+__version__ = '1.8.3'
 
 default_print_command = False        # for debugging purposes
 
@@ -721,6 +721,7 @@ def complete_report(report, db, resources_directory, output, hmm_pgap, fun):
         if len(report) > 0:
             write_cog_categories(report, f'{output}/KOG')
     elif db == 'COG':
+        cols = [cols[0]] + ['General functional category', 'Functional category'] + cols[1:]
         cog_table = parse_whog(f'{resources_directory}/cog-20.def.tab')
         cog_table = pd.merge(cog_table, fun, on='Functional category (letter)', how='left')
         report = pd.merge(report, cog_table, on='DB ID', how='left')
