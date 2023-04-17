@@ -7,6 +7,7 @@ By João Sequeira
 Nov 2019
 """
 
+import shutil
 from argparse import ArgumentParser, ArgumentTypeError
 from glob import glob
 import os
@@ -23,7 +24,7 @@ from requests import get as requests_get
 import xml.etree.ElementTree as ET
 import re
 
-__version__ = '1.8.3'
+__version__ = '1.9.0'
 
 default_print_command = False        # for debugging purposes
 
@@ -348,7 +349,7 @@ def create_tax_db(smp_directory, db_directory, db_prefix, taxids, hmm_pgap):
     """
     Creates HMM DBs for all required tax IDs, and checks for DBS for cellular organisms and 0 (nan)
     :param smp_directory: (str) - Name of folder with the SMP files
-    :param output: (str) - Name of folder to output PN files and databases
+    :param db_directory: (str) - Name of folder to store the PN files and databases
     :param db_prefix: (str) - Filename prefix for PN files and databases
     :param taxids: (list) - list of tax ids present in the dataset lacking db
     :param hmm_pgap: (pandas.DataFrame) - df with the information from the hmm_GAP.tsv file
@@ -399,7 +400,7 @@ def cog2ko(cogblast, cog2ko_ssv=f'{sys.path[0]}/resources_directory/cog2ko.ssv')
             """awk '{{if (length($4) == 7) print $1"\t"$4}}' {0}/COG.mappings.v11.0.txt | sort | 
             join - {0}/string2ko.tsv""".format(directory), file=f'{directory}/cog2ko.ssv')
         df = pd.read_csv(f'{directory}/cog2ko.ssv', sep=' ', names=['StringDB', 'COG', 'KO'])
-        df[['COG', 'KO']].groupby('COG')['KO'].agg([('KO', ','.join)]).reset_index().to_csv(
+        df[['COG', 'KO']].groupby('COG')['KO'].agg([('KO', lambda x: ';'.join(set(x)))]).reset_index().to_csv(
             f'{directory}/cog2ko.tsv', sep='\t', index=False, header=['DB ID', 'KO'])
     return pd.merge(cogblast, pd.read_csv(cog2ko_ssv, sep='\t'), on='DB ID', how='left')
 
@@ -693,7 +694,7 @@ def get_rpsbproc_info(rpsbproc_report):
 
 
 def get_db_ec(description, suffix=''):
-    m = re.compile("EC:([1-6\-].[0-9\-]+.[0-9\-]+.[0-9\-]+)" + suffix).search(description)
+    m = re.compile("EC:([1-6\-].[\d\-]+.[\d\-]+.[\d\-]+)" + suffix).search(description)
     if m is None:
         return np.nan
     return m.group(1)
@@ -728,7 +729,7 @@ def complete_report(report, db, resources_directory, output, hmm_pgap, fun):
         # cog2ec
         report = cog2ec(report, table=f'{resources_directory}/cog2ec.tsv')
         # cog2ko
-        #report = cog2ko(report, cog2ko_ssv=f'{resources_directory}/cog2ko.tsv')    # TODO - this requires fixing
+        report = cog2ko(report, cog2ko_ssv=f'{resources_directory}/cog2ko.tsv')
         if len(report) > 0:
             write_cog_categories(report, f'{output}/COG')
     else:
@@ -841,7 +842,7 @@ def organize_results(file, output, resources_directory, databases, hmm_pgap, cdd
         multi_sheet_excel(xlsx_report, report, sheet_name=db)
         i += 1
     all_reports.sort_values(by=['qseqid', 'DB ID']).to_csv(f'{output}/reCOGnizer_results.tsv', sep='\t', index=False)
-    xlsx_report.save()
+    xlsx_report.close()
 
 
 def read_ecmap(fh):
@@ -967,9 +968,7 @@ def main():
             no_output_sequences=args.no_output_sequences)
         if not args.keep_intermediates:
             for directory in [f'{args.output}/{folder}' for folder in ['asn', 'blast', 'rpsbproc', 'tmp']]:
-                files = glob(f'{directory}/*')
-                for file in files:
-                    os.remove(file)
+                shutil.rmtree(directory)
 
 
 if __name__ == '__main__':

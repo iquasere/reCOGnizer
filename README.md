@@ -1,6 +1,6 @@
 # reCOGnizer
 
-A tool for domain based annotation with databases from the [Conserved Domains Database](https://www.ncbi.nlm.nih.gov/Structure/cdd/cdd.shtml).
+A tool for domain-based annotation with databases from the [Conserved Domains Database](https://www.ncbi.nlm.nih.gov/Structure/cdd/cdd.shtml).
 
 * [Features](https://github.com/iquasere/reCOGnizer#features)
 * [Installing reCOGnizer](https://github.com/iquasere/reCOGnizer#installing-recognizer)
@@ -28,27 +28,23 @@ Fig. 1. Workflow of reGOGnizer, which includes the pre-analysis step of construc
 
 ## Installing reCOGnizer
 
-To install reCOGnizer, clone this repository and run the install script:
+To install reCOGnizer, simply run: ```conda install -c conda-forge -c bioconda recognizer```
+
+### From source
+
+reCOGnizer can also be installed from source by running:
 ```
 git clone https://github.com/iquasere/reCOGnizer.git
 sudo reCOGnizer/install.bash
 ```
 
-### With Bioconda
-
-reCOGnizer can also be installed with Conda! Many thanks to [Devon Ryan](https://github.com/dpryan79) for his precious help!
-
-Install:  ```conda install -c conda-forge -c bioconda recognizer```
-
-Test installation: ```recognizer.py -v```
-
-**Warning:** running with Conda is better performed using the -rd parameter to store the databases and other resources in a directory of your choice. Doing so will prevent reCOGnizer from putting these files in unexpected locations.
+To test that reCOGnizer was correctly installed, run: ```recognizer.py -v```
 
 ## Annotation with reCOGnizer
 
 The simplest way to run reCOGnizer is to just specify the fasta filename and an output directory - though even the output directory is not mandatory. It is recommended that a "resources" directory is specified to store the databases that reCOGnizer requires.
 ```
-recognizer.py -f input_file.fasta -o recognizer_output -rd resources_directory
+recognizer.py -f input_file.fasta -o output_directory
 ```
 
 ## Output
@@ -57,49 +53,54 @@ reCOGnizer takes a FASTA file as input and produces two main outputs into the ou
 * ```reCOGnizer_results.tsv```, a table with the annotations for each protein
 * ```cog_quantification``` and respective Krona representation (Fig. 2), which describes the functional landscape of the proteins in the input file
 
-![ScreenShot](krona_plot.png)
-Fig. 2. Krona plot with the quantification of COGs identified in the simulated dataset used to test [MOSCA](github.com/iquasere/MOSCA) and reCOGnizer.
+[![Image Alt Text](krona_plot.png)](https://iquasere.github.io/reCOGnizer)
+
+Fig. 2. Krona plot with the quantification of COGs identified in the simulated dataset used to test [MOSCA](https://github.com/iquasere/MOSCA) and reCOGnizer.
+
+## Using previously gathered taxonomic information
+
+reCOGnizer can make use of taxonomic information by filtering Markov Models for the specific taxa of interest. 
+This can be done by providing a file with the taxonomic information of the proteins.
+
 
 ## Other parameters
 
 ```
-usage: recognizer.py [-h] [-t THREADS] [-o OUTPUT] [-rd RESOURCES_DIRECTORY]
-                     [-db DATABASE] [--custom-database]
-                     [-seqs MAX_TARGET_SEQS] [--tsv] [--remove-spaces]
-                     [--no-output-sequences] [--no-blast-info] [-v] -f FILE
-
-reCOGnizer - a tool for domain based annotation with the COG database
-
-optional arguments:
   -h, --help            show this help message and exit
+  -f FILE, --file FILE  Fasta file with protein sequences for annotation
   -t THREADS, --threads THREADS
-                        Number of threads for reCOGnizer to use. Default is
-                        number of CPUs available minus 2.
+                        Number of threads for reCOGnizer to use [max available - 1]
+  --evalue EVALUE       Maximum e-value to report annotations for [1e-2]
+  --pident PIDENT       [DEPRECATED] Minimum pident to report annotations for [0]
   -o OUTPUT, --output OUTPUT
-                        Output directory
+                        Output directory [reCOGnizer_results]
+  -dr, --download-resources
+                        If resources for reCOGnizer are not available at "resources_directory" [false]
   -rd RESOURCES_DIRECTORY, --resources-directory RESOURCES_DIRECTORY
-                        Output directory for storing COG databases and other
-                        resources
+                        Output directory for storing databases and other resources [~/recognizer_resources]
+  -dbs DATABASES, --databases DATABASES
+                        Databases to include in functional annotation (comma-separated) [all available]
   -db DATABASE, --database DATABASE
-                        Basename of COG database for annotation. If multiple
-                        databases, use comma separated list (db1,db2,db3)
+                        Basename of database for annotation. If multiple databases, use comma separated list (db1,db2,db3)
   --custom-database     If database was NOT produced by reCOGnizer
-  -seqs MAX_TARGET_SEQS, --max-target-seqs MAX_TARGET_SEQS
-                        Number of maximum identifications for each protein.
-                        Default is 1.
-  --tsv                 Tables will be produced in TSV format (and not EXCEL).
-  --remove-spaces       BLAST ignores sequences IDs after the first space.
-                        This option changes all spaces to underscores to keep
-                        the full IDs.
+  -mts MAX_TARGET_SEQS, --max-target-seqs MAX_TARGET_SEQS
+                        Number of maximum identifications for each protein [1]
+  --keep-spaces         BLAST ignores sequences IDs after the first space. This option changes all spaces to underscores to keep the full IDs.
   --no-output-sequences
-                        Protein sequences from the FASTA input will be stored
-                        in their own column.
-  --no-blast-info       Information from the alignment will be stored in their
-                        own columns.
+                        Protein sequences from the FASTA input will be stored in their own column.
+  --no-blast-info       Information from the alignment will be stored in their own columns.
+  --quiet               Don't output download information, used mainly for CI.
+  -sd, --skip-downloaded
+                        Skip download of resources detected as already downloaded.
+  --keep-intermediates  Keep intermediate annotation files generated in reCOGnizer's workflow, i.e., ASN, RPSBPROC and BLAST reports and split FASTA inputs.
   -v, --version         show program's version number and exit
 
-required named arguments:
-  -f FILE, --file FILE  Fasta file with protein sequences for annotation
+Taxonomy Arguments:
+  --tax-file TAX_FILE   File with taxonomic identification of proteins inputted (TSV). Must have one line per query, query name on first column, taxid on second.
+  --protein-id-col PROTEIN_ID_COL
+                        Name of column with protein headers as in supplied FASTA file [qseqid]
+  --tax-col TAX_COL     Name of column with tax IDs of proteins [Taxonomic identifier (SPECIES)]
+  --species-taxids      If tax col contains Tax IDs of species (required for running COG taxonomic)
 ```
 
 ## Referencing reCOGnizer
