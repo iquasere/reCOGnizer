@@ -38,13 +38,13 @@ git clone https://github.com/iquasere/reCOGnizer.git
 sudo reCOGnizer/install.bash
 ```
 
-To test that reCOGnizer was correctly installed, run: ```recognizer.py -v```
+To test that reCOGnizer was correctly installed, run: ```recognizer -v```
 
 ## Annotation with reCOGnizer
 
 The simplest way to run reCOGnizer is to just specify the fasta filename and an output directory - though even the output directory is not mandatory. It is recommended that a "resources" directory is specified to store the databases that reCOGnizer requires.
 ```
-recognizer.py -f input_file.fasta -o output_directory
+recognizer -f input_file.fasta -o output_directory
 ```
 
 ## Output
@@ -61,7 +61,13 @@ Fig. 2. Krona plot with the quantification of COGs identified in the simulated d
 
 reCOGnizer can make use of taxonomic information by filtering Markov Models for the specific taxa of interest. 
 This can be done by providing a file with the taxonomic information of the proteins.
-
+To simulate this, run the following commands, after installing reCOGnizer:
+```
+git clone https://github.com/iquasere/reCOGnizer.git
+cd reCOGnizer/ci
+recognizer -f proteomes.fasta --f UPIMAPI_results.tsv --tax-col 'Taxonomic lineage IDs (SPECIES)' --protein-id-col qseqid --species-taxids
+```
+Running reCOGnizer this way will usually obtain better results, but will likely take much longer to finish.
 
 ## Other parameters
 
