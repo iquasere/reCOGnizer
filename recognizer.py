@@ -24,7 +24,7 @@ from requests import get as requests_get
 import xml.etree.ElementTree as ET
 import re
 
-__version__ = '1.9.0'
+__version__ = '1.9.1'
 
 default_print_command = False        # for debugging purposes
 
@@ -210,7 +210,8 @@ def download_resources(directory, quiet=False, skip_downloaded=False):
     for file in [
         'cddid_all.tbl', 'eggnog4.protein_id_conversion.tsv', 'NOG.members.tsv', 'cddannot.dat',
             'cddannot_generic.dat', 'cddid.tbl']:
-        run_command(f'gunzip {directory}/{file}.gz', print_command=True)
+        if not (skip_downloaded and os.path.isfile(f'{directory}/{file}')):
+            run_command(f'gunzip {directory}/{file}.gz', print_command=True)
 
     # Extract the smps
     if sys.platform == "darwin":
