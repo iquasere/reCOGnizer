@@ -229,8 +229,7 @@ def download_resources(directory, quiet=False, skip_downloaded=False):
     with open(f'{directory}/recognizer_dwnl.timestamp', 'w') as f:
         f.write(strftime("%Y-%m-%d %H:%M:%S", gmtime()))
 
-    generate_cog2ec_df(
-        f'{directory}/eggnog4.protein_id_conversion.tsv', f'{directory}/NOG.members.tsv', directory)
+    generate_cog2ec_df(f'{directory}/eggnog4.protein_id_conversion.tsv', f'{directory}/NOG.members.tsv', directory)
 
 
 def str2bool(v):
@@ -893,7 +892,7 @@ def determine_cog2ec(map_df, frac=0.5):
     map_df_counts.drop("cog", axis=1, inplace=True)
     map_df_counts.sort_index(inplace=True)
     # Count total number of proteins per cog
-    cog_counts = map_df_counts.groupby(level=0).sum()
+    cog_counts = map_df_counts.groupby(level=0).sum(numeric_only=True)
     # Divide enzyme assignment number by total protein number to get fraction of each assignment
     ecfrac = map_df_counts.protein.div(cog_counts.protein).reset_index()
     # Get index of where fraction is above threshold
