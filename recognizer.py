@@ -24,7 +24,7 @@ from requests import get as requests_get
 import xml.etree.ElementTree as ET
 import re
 
-__version__ = '1.9.1'
+__version__ = '1.9.2'
 
 default_print_command = False        # for debugging purposes
 
@@ -35,11 +35,10 @@ def get_arguments():
         epilog="Input file must be specified.")
     parser.add_argument("-f", "--file", help="Fasta file with protein sequences for annotation")
     parser.add_argument(
-        "-t", "--threads", type=int, default=cpu_count() - 1,
-        help="Number of threads for reCOGnizer to use [max available - 1]")
-    parser.add_argument("--evalue", type=float, default=1e-3, help="Maximum e-value to report annotations for [1e-2]")
+        "-t", "--threads", type=int, default=cpu_count(),
+        help="Number of threads for reCOGnizer to use [max available]")
     parser.add_argument(
-        "--pident", type=float, default=0.0, help="[DEPRECATED] Minimum pident to report annotations for [0]")
+        "--evalue", type=float, default=1e-3, help="Maximum e-value to report annotations for [1e-2]")
     parser.add_argument(
         "-o", "--output", help="Output directory [reCOGnizer_results]", default='reCOGnizer_results')
     parser.add_argument(
@@ -52,12 +51,12 @@ def get_arguments():
         "-dbs", "--databases", default="CDD,Pfam,NCBIfam,Protein_Clusters,Smart,TIGRFAM,COG,KOG",
         help="Databases to include in functional annotation (comma-separated) [all available]")
     parser.add_argument(
-        "-db", "--database",
-        help="Basename of database for annotation. If multiple databases, use comma separated list (db1,db2,db3)")
+        "--custom-databases", action="store_true", default=False,
+        help="If databases inputted were NOT produced by reCOGnizer. Default databases of reCOGnizer "
+             "(e.g., COG, TIGRFAM, ...) can't be used simultaneously with custom databases.")
     parser.add_argument(
-        "--custom-database", action="store_true", default=False, help="If database was NOT produced by reCOGnizer")
-    parser.add_argument(
-        "-mts", "--max-target-seqs", type=int, default=20, help="Number of maximum identifications for each protein [1]")
+        "-mts", "--max-target-seqs", type=int, default=20,
+        help="Number of maximum identifications for each protein [1]")
     parser.add_argument(
         "--keep-spaces", action="store_true", default=False,
         help="BLAST ignores sequences IDs after the first space. "
@@ -69,7 +68,8 @@ def get_arguments():
         "--no-blast-info", action="store_true", default=False,
         help="Information from the alignment will be stored in their own columns.")
     parser.add_argument(
-        "--quiet", action="store_true", default=False, help="Don't output download information, used mainly for CI.")
+        "--quiet", action="store_true", default=False,
+        help="Don't output download information, used mainly for CI.")
     parser.add_argument(
         "-sd", "--skip-downloaded", action="store_true", default=False,
         help="Skip download of resources detected as already downloaded.")
@@ -243,9 +243,9 @@ def str2bool(v):
         raise ArgumentTypeError('Boolean value expected.')
 
 
-def run_rpsblast(query, output, reference, threads='0', max_target_seqs=1, evalue=1e-2):
+def run_rpsblast(query, output, reference, threads='0', max_target_seqs=1, evalue=1e-2, outfmt=11):
     # This run_command is different because of reference, which can't be split by space
-    bash_command = f'rpsblast -query {query} -db "{reference}" -out {output} -outfmt 11 -num_threads {threads} ' \
+    bash_command = f'rpsblast -query {query} -db "{reference}" -out {output} -outfmt {outfmt} -num_threads {threads} ' \
                    f'-max_target_seqs {max_target_seqs} -evalue {evalue} 1>recognizer.log 2>recognizer.log'
     run_pipe_command(bash_command)
 
@@ -287,15 +287,14 @@ def parse_kog(kog):
 
 
 def parse_blast(file):
+    blast_cols = [
+        'qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen', 'qstart', 'qend', 'sstart', 'send', 'evalue',
+        'bitscore']
     if os.stat(file).st_size != 0:
         blast = pd.read_csv(file, sep='\t', header=None)
-        blast.columns = [
-            'qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen', 'qstart', 'qend', 'sstart', 'send', 'evalue',
-            'bitscore']
+        blast.columns = blast_cols
         return blast
-    return pd.DataFrame(columns=[
-        'qseqid', 'sseqid', 'pident', 'length', 'mismatch', 'gapopen', 'qstart', 'qend', 'sstart', 'send', 'evalue',
-        'bitscore'])
+    return pd.DataFrame(columns=blast_cols)
 
 
 def pn2database(pn):
@@ -738,15 +737,21 @@ def complete_report(report, db, resources_directory, output, hmm_pgap, fun):
     return report[cols].rename(columns={'product_name': 'Protein description', 'ec_number': 'EC number'})
 
 
-def custom_database_workflow(file, output, threads, max_target_seqs, evalue, database):
-    dbs = database.split(',')
-    for db in dbs:
+def custom_database_workflow(output, databases, threads=15, max_target_seqs=1, evalue=1e-3):
+    for db in databases:
         if not is_db_good(db):
-            exit('Some inputted database was not valid!')
-    # run annotation with rps-blast and inputted database
-    timed_message('Running annotation with RPS-BLAST and inputted database as reference.')
-    run_rpsblast(
-        file, f'{output}/aligned.blast', ' '.join(dbs), threads=threads, max_target_seqs=max_target_seqs, evalue=evalue)
+            exit('Some inputted custom database was not valid!')
+    timed_message('Running annotation with RPS-BLAST and inputted database(s) as reference.')
+    with Pool(processes=threads) as p:
+        p.starmap(run_rpsblast, [(
+            f'{output}/tmp/tmp_{i}.fasta', f'{output}/blast/{i}_aligned.blast', ' '.join(databases), '1',
+            max_target_seqs, evalue, 6) for i in range(threads)])
+    result = pd.DataFrame()
+    for i in range(threads):
+        if os.path.isfile(f'{output}/blast/{i}_aligned.blast'):
+            result = pd.concat([result, parse_blast(f'{output}/blast/{i}_aligned.blast')])
+    result.to_csv(f'{output}/reCOGnizer_results.tsv', sep='\t', index=False)
+    result.to_excel(f'{output}/reCOGnizer_results.xlsx', index=False)
 
 
 def taxonomic_workflow(
@@ -929,11 +934,12 @@ def main():
         args.resources_directory, tax_file=args.tax_file)
 
     if not args.keep_spaces:
-        args.file = replace_spaces_with_underscores(args.file, f'{args.output}/tmp')     # if alters input file, internally alters args.file
+        args.file = replace_spaces_with_underscores(args.file, f'{args.output}/tmp')        # if alters input file, internally alters args.file
 
-    if args.database:  # if user database was inputted
+    split_fasta_by_threads(args.file, f'{args.output}/tmp/tmp', args.threads)       # this splitting is always necessary, even with taxonomy inputted, since some databases don't have taxonomy-based annotation
+    if args.custom_databases:
         custom_database_workflow(
-            args.file, args.output, args.threads, args.max_target_seqs, args.evalue, database=args.database)
+            args.output, args.databases, threads=args.threads, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
     else:
         if args.tax_file is not None:
             tax_file, lineages, all_taxids = taxids_of_interest(
@@ -944,7 +950,6 @@ def main():
                 if os.path.isfile(f'{args.output}/tmp/{taxid}.fasta'):
                     split_fasta_by_threads(
                         f'{args.output}/tmp/{taxid}.fasta', f'{args.output}/tmp/tmp_{taxid}', args.threads)
-        split_fasta_by_threads(args.file, f'{args.output}/tmp/tmp', args.threads)     # will likely always need to do this splitting
         databases_prefixes = {
             'CDD': 'cd', 'Pfam': 'pfam', 'NCBIfam': 'NF', 'Protein_Clusters': 'PRK', 'Smart': 'smart',
             'TIGRFAM': 'TIGR', 'COG': 'COG', 'KOG': 'KOG'}
