@@ -100,13 +100,25 @@ def get_arguments():
     args.resources_directory = args.resources_directory.rstrip('/')
     args.databases = args.databases.split(',')
 
+    # database inputs check - if custom databases, check if they are in the correct format.
+    # If default databases, check if all are recognized. If using both default and custom, exit.
+    if not args.custom_databases:
+        for database in args.databases:
+            if database not in ["CDD", "Pfam", "NCBIfam", "Protein_Clusters", "Smart", "TIGRFAM", "COG", "KOG"]:
+                exit(f'Default database {database} not recognized. Exiting.')
+    else:
+        for database in args.databases:
+            if database in ["CDD", "Pfam", "NCBIfam", "Protein_Clusters", "Smart", "TIGRFAM", "COG", "KOG"]:
+                exit(f"Default database {database} can't be used with custom databases.")
+            if not is_db_good(database):
+                exit(f"Custom database {database} not in correct format. Exiting.")
+
     if hasattr(args, "file"):
         for directory in [f'{args.output}/{folder}' for folder in ['asn', 'blast', 'rpsbproc', 'tmp']] + [
                 f'{args.resources_directory}/dbs']:
             if not os.path.isdir(directory):
                 Path(directory).mkdir(parents=True, exist_ok=True)
                 print(f'Created {directory}')
-
     return args
 
 
@@ -150,7 +162,7 @@ def get_tabular_taxonomy(output):
     with open(output, 'w') as f:
         written = f.write('\t'.join(
             ['taxid', 'name', 'rank', 'parent_taxid']) + '\n')  # assignment to "written" stops output to console
-        for elem in tqdm(elems, desc='Converting XML taxonomy.rdf to TSV format'):
+        for elem in tqdm(elems, desc='Converting XML taxonomy.rdf to TSV format', ascii=' >='):
             info = [elem.get('{http://www.w3.org/1999/02/22-rdf-syntax-ns#}about').split('/')[-1]]
             scientific_name = elem.find('{http://purl.uniprot.org/core/}scientificName')
             info.append(scientific_name.text if scientific_name is not None else '')
@@ -229,7 +241,8 @@ def download_resources(directory, quiet=False, skip_downloaded=False):
     with open(f'{directory}/recognizer_dwnl.timestamp', 'w') as f:
         f.write(strftime("%Y-%m-%d %H:%M:%S", gmtime()))
 
-    generate_cog2ec_df(f'{directory}/eggnog4.protein_id_conversion.tsv', f'{directory}/NOG.members.tsv', directory)
+    generate_cog2ec_df(
+        f'{directory}/eggnog4.protein_id_conversion.tsv', f'{directory}/NOG.members.tsv', directory)
 
 
 def str2bool(v):
@@ -907,6 +920,7 @@ def determine_cog2ec(map_df, frac=0.5):
 
 
 def generate_cog2ec_df(conversion, members, resources_directory):
+    timed_message("Generating COG to EC mapping")
     enzymes, proteins = ecmap(conversion)
     ecmap_df = pd.DataFrame(data={"enzyme": enzymes, "protein": proteins})
     cogs, proteins = cogmap(members)
