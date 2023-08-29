@@ -369,7 +369,7 @@ def create_tax_db(smp_directory, db_directory, db_prefix, taxids, hmm_pgap):
     taxids_with_db = []
     if len(taxids) == 0:
         return []
-    for taxid in tqdm(taxids, desc=f'Organizing PN files for [{len(taxids)}] Tax IDs.'):
+    for taxid in tqdm(taxids, desc=f'Organizing PN files for [{len(taxids)}] Tax IDs.', ascii=' >='):
         smp_list = [f'{smp_directory}/{source}' for source in hmm_pgap[hmm_pgap['taxonomic_range'] == taxid][
             'source_identifier']]
         with open(f'{db_directory}/{db_prefix}_{taxid}.pn', 'w') as f:
@@ -485,7 +485,7 @@ def split_fasta_by_taxid(file, tax_file, protein_id_col, tax_col, output):
     for col in [protein_id_col, 'index']:
         cols.remove(col)
     fastas = fastas.groupby(protein_id_col)[cols].first()
-    for taxid in tqdm(set(tax_file[tax_col].tolist()), desc=f'Splitting sequences by taxa'):
+    for taxid in tqdm(set(tax_file[tax_col].tolist()), desc=f'Splitting sequences by taxa', ascii=' >='):
         write_fasta(
             fastas[fastas[tax_col] == taxid].reset_index()[[protein_id_col, 'sequence']],
             f'{output}/tmp/{taxid}.fasta', protein_id_col)
@@ -510,7 +510,7 @@ def get_members_df(resources_directory):
     members = members[members[1].str.startswith('COG')]
     members[5] = members[5].apply(lambda x: [name.split('.')[0] for name in x.split(',')])
     members_dict = {}
-    for i in tqdm(range(len(members)), desc='Organizing COGs corresponding to each tax ID'):
+    for i in tqdm(range(len(members)), desc='Organizing COGs corresponding to each tax ID', ascii=' >='):
         for taxid in members.iloc[i, 5]:
             if taxid in members_dict.keys():
                 members_dict[taxid] += f',{members.iloc[i, 1]}'
@@ -524,7 +524,7 @@ def get_members_df(resources_directory):
 
 def check_cog_tax_database(smp_directory, db_directory):
     smps = glob(f'{smp_directory}/COG*.smp')
-    for smp in tqdm(smps, desc=f'Checking split COG database for [{len(smps)}] COGs.'):
+    for smp in tqdm(smps, desc=f'Checking split COG database for [{len(smps)}] COGs.', ascii=' >='):
         name = smp.split('/')[-1].split('.')[0]
         with open(f'{db_directory}/{name}.pn', 'w') as f:
             f.write(smp)
@@ -960,7 +960,7 @@ def main():
                 args.tax_file, args.protein_id_col, args.tax_col, taxonomy_df)
             split_fasta_by_taxid(args.file, tax_file, args.protein_id_col, args.tax_col, args.output)
             # split FASTA for multiprocessing
-            for taxid in tqdm(lineages.keys(), desc=timed_message('Splitting FASTAs')):
+            for taxid in tqdm(lineages.keys(), desc=timed_message('Splitting FASTAs'), ascii=' >='):
                 if os.path.isfile(f'{args.output}/tmp/{taxid}.fasta'):
                     split_fasta_by_threads(
                         f'{args.output}/tmp/{taxid}.fasta', f'{args.output}/tmp/tmp_{taxid}', args.threads)
