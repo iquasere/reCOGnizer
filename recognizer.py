@@ -38,7 +38,7 @@ def get_arguments():
         "-t", "--threads", type=int, default=cpu_count(),
         help="Number of threads for reCOGnizer to use [max available]")
     parser.add_argument(
-        "--evalue", type=float, default=1e-3, help="Maximum e-value to report annotations for [1e-2]")
+        "--evalue", type=float, default=1e-3, help="Maximum e-value to report annotations for [1e-3]")
     parser.add_argument(
         "-o", "--output", help="Output directory [reCOGnizer_results]", default='reCOGnizer_results')
     parser.add_argument(

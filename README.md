@@ -69,15 +69,15 @@ recognizer -f proteomes.fasta --f UPIMAPI_results.tsv --tax-col 'Taxonomic linea
 ```
 Running reCOGnizer this way will usually obtain better results, but will likely take much longer to finish.
 
-## Other parameters
+## reCOGnizer parameters
 
 ```
+options:
   -h, --help            show this help message and exit
   -f FILE, --file FILE  Fasta file with protein sequences for annotation
   -t THREADS, --threads THREADS
-                        Number of threads for reCOGnizer to use [max available - 1]
-  --evalue EVALUE       Maximum e-value to report annotations for [1e-2]
-  --pident PIDENT       [DEPRECATED] Minimum pident to report annotations for [0]
+                        Number of threads for reCOGnizer to use [max available]
+  --evalue EVALUE       Maximum e-value to report annotations for [1e-3]
   -o OUTPUT, --output OUTPUT
                         Output directory [reCOGnizer_results]
   -dr, --download-resources
@@ -86,9 +86,7 @@ Running reCOGnizer this way will usually obtain better results, but will likely 
                         Output directory for storing databases and other resources [~/recognizer_resources]
   -dbs DATABASES, --databases DATABASES
                         Databases to include in functional annotation (comma-separated) [all available]
-  -db DATABASE, --database DATABASE
-                        Basename of database for annotation. If multiple databases, use comma separated list (db1,db2,db3)
-  --custom-database     If database was NOT produced by reCOGnizer
+  --custom-databases    If databases inputted were NOT produced by reCOGnizer. Default databases of reCOGnizer (e.g., COG, TIGRFAM, ...) can't be used simultaneously with custom databases.
   -mts MAX_TARGET_SEQS, --max-target-seqs MAX_TARGET_SEQS
                         Number of maximum identifications for each protein [1]
   --keep-spaces         BLAST ignores sequences IDs after the first space. This option changes all spaces to underscores to keep the full IDs.
