@@ -1,4 +1,4 @@
-FROM continuumio/miniconda3:22.11.1
+FROM continuumio/miniconda3
 
 RUN buildDeps='build-essential zlib1g-dev' \
 && apt-get update \
@@ -7,8 +7,7 @@ RUN buildDeps='build-essential zlib1g-dev' \
 && conda config --add channels bioconda \
 && conda config --add channels conda-forge \
 && git clone https://github.com/iquasere/reCOGnizer.git \
-&& conda install -c conda-forge -y mamba \
-&& mamba env update --file reCOGnizer/envs/environment.yml --name base \
+&& conda env update --file reCOGnizer/envs/environment.yml --name base \
 && bash reCOGnizer/envs/ci_build.sh \
 && conda clean --all -y \
 && apt-get purge -y --auto-remove $buildDeps
