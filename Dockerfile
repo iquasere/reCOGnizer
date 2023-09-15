@@ -7,7 +7,7 @@ RUN buildDeps='build-essential zlib1g-dev' \
 && conda config --add channels bioconda \
 && conda config --add channels conda-forge \
 && git clone https://github.com/iquasere/reCOGnizer.git \
-&& conda install -c conda-forge mamba \
+&& conda install -c conda-forge mamba=1.5.1 \
 && mamba env update --file reCOGnizer/envs/environment.yml --name base \
 && bash reCOGnizer/envs/ci_build.sh \
 && conda clean --all -y \
