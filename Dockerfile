@@ -1,4 +1,4 @@
-FROM continuumio/miniconda3:22.11.1
+FROM continuumio/miniconda3:23.3.1-0
 
 RUN buildDeps='build-essential zlib1g-dev' \
 && apt-get update \
