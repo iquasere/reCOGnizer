@@ -4,6 +4,7 @@ A tool for domain-based annotation with databases from the [Conserved Domains Da
 
 * [Features](https://github.com/iquasere/reCOGnizer#features)
 * [Installing reCOGnizer](https://github.com/iquasere/reCOGnizer#installing-recognizer)
+* [Setup the databases](https://github.com/iquasere/reCOGnizer#setup-the-databases)
 * [Annotation with reCOGnizer](https://github.com/iquasere/reCOGnizer#annotation-with-recognizer)
 * [Output](https://github.com/iquasere/reCOGnizer#output)
 * [Other parameters](https://github.com/iquasere/reCOGnizer#other-parameters)
@@ -40,12 +41,25 @@ sudo reCOGnizer/install.bash
 
 To test that reCOGnizer was correctly installed, run: ```recognizer -v```
 
+## Setup the databases
+
+reCOGnizer requires the databases from CDD and other resources from multiple sources to be downloaded before running.
+This can be accomplished by running: 
+```
+recognizer --download-resources --resources-directory resources_directory
+```
+where `resources_directory` is the directory where the resources will be stored. 
+
+By default (if a value is not specified), these resources will be stored in the user's home, but because of their large size, it might be preferable to specify other location.
+
 ## Annotation with reCOGnizer
 
-The simplest way to run reCOGnizer is to just specify the fasta filename and an output directory - though even the output directory is not mandatory. It is recommended that a "resources" directory is specified to store the databases that reCOGnizer requires.
+The simplest way to run reCOGnizer is to just specify the fasta filename and an output directory - though even the output directory is not mandatory.
 ```
-recognizer -f input_file.fasta -o output_directory
+recognizer -f input_file.fasta -o output_directory --resources-directory resources_directory
 ```
+Do note the `--resources-directory` argument is only necessary if the resources were downloaded to a different location than the default, 
+in which case the folder specified must be the same as the one used in the download step.
 
 ## Output
 
@@ -55,7 +69,7 @@ reCOGnizer takes a FASTA file as input and produces two main outputs into the ou
 
 [![Image Alt Text](krona_plot.png)](https://iquasere.github.io/reCOGnizer)
 
-Fig. 2. Krona plot with the quantification of COGs identified in the simulated dataset used to test [MOSCA](https://github.com/iquasere/MOSCA) and reCOGnizer.
+Fig. 2. Krona plot with the quantification of COGs identified in the simulated dataset used to test [MOSCA](https://github.com/iquasere/MOSCA) and reCOGnizer. Click in the plot to see the interactive version that is outputed by reCOGnizer.
 
 ## Using previously gathered taxonomic information
 

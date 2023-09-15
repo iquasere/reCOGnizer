@@ -24,7 +24,7 @@ from requests import get as requests_get
 import xml.etree.ElementTree as ET
 import re
 
-__version__ = '1.9.2'
+__version__ = '1.9.3'
 
 default_print_command = False        # for debugging purposes
 
@@ -113,7 +113,7 @@ def get_arguments():
             if not is_db_good(database):
                 exit(f"Custom database {database} not in correct format. Exiting.")
 
-    if hasattr(args, "file"):
+    if args.file:
         for directory in [f'{args.output}/{folder}' for folder in ['asn', 'blast', 'rpsbproc', 'tmp']] + [
                 f'{args.resources_directory}/dbs']:
             if not os.path.isdir(directory):
@@ -156,13 +156,12 @@ def get_tabular_taxonomy(output):
     with open('taxonomy.rdf.xz', 'wb') as f:
         f.write(res.content)
     run_command(f'unxz taxonomy.rdf.xz')
-    print('Reading RDF taxonomy')
+    timed_message('Building taxonomy.tsv')
     root = ET.parse('taxonomy.rdf').getroot()
     elems = root.findall('{http://www.w3.org/1999/02/22-rdf-syntax-ns#}Description')
     with open(output, 'w') as f:
-        written = f.write('\t'.join(
-            ['taxid', 'name', 'rank', 'parent_taxid']) + '\n')  # assignment to "written" stops output to console
-        for elem in tqdm(elems, desc='Converting XML taxonomy.rdf to TSV format', ascii=' >='):
+        written = f.write('\t'.join(['taxid', 'name', 'rank', 'parent_taxid']) + '\n')  # assignment to "written" stops output to console
+        for elem in elems:
             info = [elem.get('{http://www.w3.org/1999/02/22-rdf-syntax-ns#}about').split('/')[-1]]
             scientific_name = elem.find('{http://purl.uniprot.org/core/}scientificName')
             info.append(scientific_name.text if scientific_name is not None else '')
@@ -941,7 +940,7 @@ def main():
         download_resources(
             args.resources_directory, quiet=args.quiet, skip_downloaded=args.skip_downloaded)
 
-    if not hasattr(args, "file"):
+    if not args.file:
         exit('No input file specified. Exiting.')
 
     cddid, hmm_pgap, fun, taxonomy_df, members_df = load_relational_tables(
