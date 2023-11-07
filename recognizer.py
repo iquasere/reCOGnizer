@@ -24,9 +24,9 @@ from requests import get as requests_get
 import xml.etree.ElementTree as ET
 import re
 
-__version__ = '1.9.3'
+__version__ = '1.9.4'
 
-default_print_command = False        # for debugging purposes
+print_commands = False        # for debugging purposes, can be changed with --debug parameter
 
 
 def get_arguments():
@@ -68,15 +68,18 @@ def get_arguments():
         "--no-blast-info", action="store_true", default=False,
         help="Information from the alignment will be stored in their own columns.")
     parser.add_argument(
-        "--quiet", action="store_true", default=False,
-        help="Don't output download information, used mainly for CI.")
-    parser.add_argument(
         "-sd", "--skip-downloaded", action="store_true", default=False,
         help="Skip download of resources detected as already downloaded.")
     parser.add_argument(
         "--keep-intermediates", default=False, action='store_true',
         help="Keep intermediate annotation files generated in reCOGnizer's workflow, "
              "i.e., ASN, RPSBPROC and BLAST reports and split FASTA inputs.")
+    parser.add_argument(
+        "--quiet", action="store_true", default=False,
+        help="Don't output download information, used mainly for CI.")
+    parser.add_argument(
+        "--debug", action="store_true", default=False,
+        help="Print all commands running in the background, including those of rpsblast and rpsbproc.")
     parser.add_argument('-v', '--version', action='version', version=f'reCOGnizer {__version__}')
 
     taxArguments = parser.add_argument_group('Taxonomy Arguments')
@@ -99,6 +102,8 @@ def get_arguments():
     args.output = args.output.rstrip('/')
     args.resources_directory = args.resources_directory.rstrip('/')
     args.databases = args.databases.split(',')
+    global print_commands
+    print_commands = args.debug
 
     # database inputs check - if custom databases, check if they are in the correct format.
     # If default databases, check if all are recognized. If using both default and custom, exit.
@@ -126,7 +131,7 @@ def timed_message(message):
     print(f'{strftime("%Y-%m-%d %H:%M:%S", gmtime())}: {message}')
 
 
-def run_command(bash_command, print_command=default_print_command, stdout=None, stderr=None):
+def run_command(bash_command, print_command=print_commands, stdout=None, stderr=None):
     if print_command:
         print(bash_command)
     run(bash_command.split(), stdout=stdout, stderr=stderr)
@@ -139,7 +144,7 @@ def human_time(seconds):
     return strftime("%Hh%Mm%Ss", gmtime(seconds))
 
 
-def run_pipe_command(bash_command, file='', mode='w', print_command=default_print_command):
+def run_pipe_command(bash_command, file='', mode='w', print_command=print_commands):
     if print_command:
         print(f'{bash_command}{f" > {file}" if file != "" else ""}')
     if file == '':
@@ -711,44 +716,6 @@ def get_db_ec(description, suffix=''):
     return m.group(1)
 
 
-def complete_report(report, db, resources_directory, output, hmm_pgap, fun):
-    cols = ['qseqid', 'DB ID', 'product_name', 'DB description', 'ec_number', 'KO', 'CDD ID', 'taxonomic_range_name',
-            'taxonomic_range', 'Superfamilies', 'Sites', 'Motifs',  'pident', 'length', 'mismatch', 'gapopen',
-            'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore']
-    if db in ['CDD', 'Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
-        report = pd.merge(report, hmm_pgap, left_on='DB ID', right_on='source_identifier', how='left')
-        if db == 'CDD':
-            report['ec_number'] = report['DB description'].apply(get_db_ec, suffix="\)")
-    elif db == 'Smart':
-        smart_table = pd.read_csv(
-            f'{resources_directory}/descriptions.pl', sep='\t', skiprows=2, names=['DB ID', 'product_name'],
-            usecols=[1, 2])
-        smart_table['DB ID'] = smart_table['DB ID'].str.replace('SM', 'smart')
-        report = pd.merge(report, smart_table, on='DB ID', how='left')
-        report['ec_number'] = report['DB description'].apply(get_db_ec)
-    elif db == 'KOG':
-        kog_table = parse_kog(f'{resources_directory}/kog')
-        kog_table = pd.merge(kog_table, fun, on='Functional category (letter)', how='left')
-        report = pd.merge(report, kog_table, on='DB ID', how='left')
-        if len(report) > 0:
-            write_cog_categories(report, f'{output}/KOG')
-    elif db == 'COG':
-        cols = [cols[0]] + ['General functional category', 'Functional category'] + cols[1:]
-        cog_table = parse_whog(f'{resources_directory}/cog-20.def.tab')
-        cog_table = pd.merge(cog_table, fun, on='Functional category (letter)', how='left')
-        report = pd.merge(report, cog_table, on='DB ID', how='left')
-        # cog2ec
-        report = cog2ec(report, table=f'{resources_directory}/cog2ec.tsv')
-        # cog2ko
-        report = cog2ko(report, cog2ko_ssv=f'{resources_directory}/cog2ko.tsv')
-        if len(report) > 0:
-            write_cog_categories(report, f'{output}/COG')
-    else:
-        return 'Invalid database for retrieving further information!'
-    cols = [col for col in cols if col in report.columns]
-    return report[cols].rename(columns={'product_name': 'Protein description', 'ec_number': 'EC number'})
-
-
 def custom_database_workflow(output, databases, threads=15, max_target_seqs=1, evalue=1e-3):
     for db in databases:
         if not is_db_good(db):
@@ -838,6 +805,45 @@ def multiprocess_workflow(
     db_report.to_csv(f'{output}/rpsbproc/{base}_report.tsv', sep='\t')
 
 
+def complete_report(report, db, resources_directory, output, hmm_pgap, fun):
+    cols = ['qseqid', 'DB ID', 'product_name', 'DB description', 'ec_number', 'KO', 'CDD ID', 'taxonomic_range_name',
+            'taxonomic_range', 'Superfamilies', 'Sites', 'Motifs',  'pident', 'length', 'mismatch', 'gapopen',
+            'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore']
+    if db in ['CDD', 'Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
+        report = pd.merge(report, hmm_pgap, left_on='DB ID', right_on='source_identifier', how='left')
+        if db == 'CDD':
+            report['ec_number'] = report['DB description'].apply(get_db_ec, suffix="\)")
+    elif db == 'Smart':
+        smart_table = pd.read_csv(
+            f'{resources_directory}/descriptions.pl', sep='\t', skiprows=2, names=['DB ID', 'product_name'],
+            usecols=[1, 2])
+        smart_table['DB ID'] = smart_table['DB ID'].str.replace('SM', 'smart')
+        report = pd.merge(report, smart_table, on='DB ID', how='left')
+        report['ec_number'] = report['DB description'].apply(get_db_ec)
+    elif db == 'KOG':
+        cols = [cols[0]] + ['General functional category', 'Functional category'] + cols[1:]
+        kog_table = parse_kog(f'{resources_directory}/kog')
+        kog_table = pd.merge(kog_table, fun, on='Functional category (letter)', how='left')
+        report = pd.merge(report, kog_table, on='DB ID', how='left')
+        if len(report) > 0:
+            write_cog_categories(report, f'{output}/KOG')
+    elif db == 'COG':
+        cols = [cols[0]] + ['General functional category', 'Functional category'] + cols[1:]
+        cog_table = parse_whog(f'{resources_directory}/cog-20.def.tab')
+        cog_table = pd.merge(cog_table, fun, on='Functional category (letter)', how='left')
+        report = pd.merge(report, cog_table, on='DB ID', how='left')
+        # cog2ec
+        report = cog2ec(report, table=f'{resources_directory}/cog2ec.tsv')
+        # cog2ko
+        report = cog2ko(report, cog2ko_ssv=f'{resources_directory}/cog2ko.tsv')
+        if len(report) > 0:
+            write_cog_categories(report, f'{output}/COG')
+    else:
+        return 'Invalid database for retrieving further information!'
+    cols = [col for col in cols if col in report.columns]
+    return report[cols].rename(columns={'product_name': 'Protein description', 'ec_number': 'EC number'})
+
+
 def organize_results(file, output, resources_directory, databases, hmm_pgap, cddid, fun, no_output_sequences=False):
     timed_message("Organizing annotation results")
     i = 1
@@ -846,16 +852,20 @@ def organize_results(file, output, resources_directory, databases, hmm_pgap, cdd
     for db in databases:
         run_pipe_command(f'cat {output}/blast/{db}_*_aligned.blast', file=f'{output}/blast/{db}_aligned.blast')
         print(f'[{i}/{len(databases)}] Handling {db} annotation')
-        report = pd.read_csv(f'{output}/rpsbproc/{db}_report.tsv', sep='\t', index_col=0)
-        report = pd.merge(
-            report, parse_blast(f'{output}/blast/{db}_aligned.blast'), on=['qseqid', 'sseqid'], how='left')
+        blast_res = parse_blast(f'{output}/blast/{db}_aligned.blast')
+        if db != 'KOG':     # rpsbproc doesn't work with KOG
+            rpsbproc_res = pd.read_csv(f'{output}/rpsbproc/{db}_report.tsv', sep='\t', index_col=0)
+            report = pd.merge(rpsbproc_res, blast_res, on=['qseqid', 'sseqid'], how='left')
+        else:
+            report = blast_res
         report = pd.merge(report, cddid, left_on='sseqid', right_on='CDD ID', how='left')
         if not no_output_sequences:
             report = add_sequences(file, report)        # adding protein sequences if requested
         report = complete_report(report, db, resources_directory, output, hmm_pgap, fun)
         report.drop_duplicates(inplace=True)
         report.to_csv(f'{output}/{db}_report.tsv', sep='\t', index=False)
-        all_reports = pd.concat([all_reports, report])
+        if len(report) > 0:
+            all_reports = pd.concat([all_reports, report])
         multi_sheet_excel(xlsx_report, report, sheet_name=db)
         i += 1
     all_reports.sort_values(by=['qseqid', 'DB ID']).to_csv(f'{output}/reCOGnizer_results.tsv', sep='\t', index=False)
