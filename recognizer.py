@@ -848,7 +848,7 @@ def organize_results(file, output, resources_directory, databases, hmm_pgap, cdd
     timed_message("Organizing annotation results")
     i = 1
     xlsx_report = pd.ExcelWriter(f'{output}/reCOGnizer_results.xlsx', engine='xlsxwriter')
-    all_reports = pd.DataFrame()
+    all_reports = pd.DataFrame(columns=['qseqid', 'DB ID'])     # intialize with these columns so if it has no rows, at least it has the columns to groupby
     for db in databases:
         run_pipe_command(f'cat {output}/blast/{db}_*_aligned.blast', file=f'{output}/blast/{db}_aligned.blast')
         print(f'[{i}/{len(databases)}] Handling {db} annotation')
