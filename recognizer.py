@@ -52,8 +52,9 @@ def get_arguments():
         help="Databases to include in functional annotation (comma-separated) [all available]")
     parser.add_argument(
         "--custom-databases", action="store_true", default=False,
-        help="If databases inputted were NOT produced by reCOGnizer. Default databases of reCOGnizer "
-             "(e.g., COG, TIGRFAM, ...) can't be used simultaneously with custom databases.")
+        help="If databases inputted were NOT produced by reCOGnizer [False]. Default databases of reCOGnizer "
+             "(e.g., COG, TIGRFAM, ...) can't be used simultaneously with custom databases. Use together with the "
+             "'--databases' parameter.")
     parser.add_argument(
         "-mts", "--max-target-seqs", type=int, default=20,
         help="Number of maximum identifications for each protein [1]")
@@ -80,6 +81,9 @@ def get_arguments():
     parser.add_argument(
         "--debug", action="store_true", default=False,
         help="Print all commands running in the background, including those of rpsblast and rpsbproc.")
+    parser.add_argument(
+        "--test-run", action="store_true", default=False,
+        help="This parameter is only appropriate for reCOGnizer's tests on GitHub. Should not be used.")
     parser.add_argument('-v', '--version', action='version', version=f'reCOGnizer {__version__}')
 
     taxArguments = parser.add_argument_group('Taxonomy Arguments')
@@ -188,7 +192,7 @@ def get_tabular_taxonomy(output):
             written = f.write('\t'.join(info) + '\n')
 
 
-def download_resources(directory, quiet=False):
+def download_resources(directory, quiet=False, test_run=False):
     timestamp_file = f'{directory}/recognizer_dwnl.timestamp'
     if os.path.isfile(timestamp_file):
         with open(timestamp_file) as f:
@@ -233,6 +237,9 @@ def download_resources(directory, quiet=False):
     ]
     for location in web_locations:
         filename = location.split('/')[-1]
+        if filename == 'cdd.tar.gz' and test_run:       # test on github, this makes it quicker
+            os.rename('reCOGnizer/ci/cdd.tar.gz', f'{directory}/cdd.tar.gz')
+            continue
         if os.path.isfile(f"{directory}/{filename}"):
             print(f"Removing {directory}/{filename}")
             os.remove(f"{directory}/{filename}")
@@ -967,7 +974,7 @@ def organize_results(file, output, resources_directory, databases, hmm_pgap, cdd
 def main():
     args = get_arguments()
 
-    download_resources(args.resources_directory, quiet=args.quiet)
+    download_resources(args.resources_directory, quiet=args.quiet, test_run=args.test_run)
 
     if not args.file:
         exit('No input file specified. Exiting.')
