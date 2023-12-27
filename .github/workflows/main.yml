@@ -73,4 +73,4 @@ jobs:
           docker load --input /tmp/recognizer.tar
           docker image ls -a
       - name: Custom database annotation
-        run: docker run recognizer /bin/bash -c "tar -xzf reCOGnizer/ci/cdd.tar.gz -C resources_directory; makeprofiledb -in reCOGnizer/ci/ci.pn -out resources_directory/db; recognizer -f reCOGnizer/ci/proteomes.fasta -rd resources_directory --quiet -dbs resources_directory/db --custom-databases --test-run"
+        run: docker run recognizer /bin/bash -c "mkdir resources_directory; tar -xzf reCOGnizer/ci/cdd.tar.gz -C resources_directory; makeprofiledb -in reCOGnizer/ci/ci.pn -out resources_directory/db; recognizer -f reCOGnizer/ci/proteomes.fasta -rd resources_directory --quiet -dbs resources_directory/db --custom-databases --test-run"

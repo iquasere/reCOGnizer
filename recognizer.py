@@ -8,6 +8,7 @@ Nov 2019
 """
 
 import shutil
+import warnings
 from argparse import ArgumentParser, ArgumentTypeError
 from glob import glob
 import os
@@ -26,7 +27,7 @@ import re
 
 __version__ = '1.10.0'
 
-print_commands = False        # for debugging purposes, can be changed with --debug parameter
+print_commands = False  # for debugging purposes, can be changed with --debug parameter
 
 
 def get_arguments():
@@ -104,7 +105,7 @@ def get_arguments():
     args = parser.parse_args()
 
     # Check for deprecated parameters. reCOGnizer will still fail, but it will inform on them.
-    for param in ['skip_downloaded', 'download_resources']:     # deprecated_db_params
+    for param in ['skip_downloaded', 'download_resources']:  # deprecated_db_params
         if getattr(args, param):
             sys.exit(f"""Error: The parameter '--{param.replace("_", "-")}' is deprecated and no longer 
             needed. If you have already downloaded resources for version 1.10 and forward, just remove this
@@ -133,7 +134,7 @@ def get_arguments():
 
     if args.file:
         for directory in [f'{args.output}/{folder}' for folder in ['asn', 'blast', 'rpsbproc', 'tmp']] + [
-                f'{args.resources_directory}/dbs']:
+            f'{args.resources_directory}/dbs']:
             if not os.path.isdir(directory):
                 Path(directory).mkdir(parents=True, exist_ok=True)
                 print(f'Created {directory}')
@@ -178,7 +179,8 @@ def get_tabular_taxonomy(output):
     root = ET.parse('taxonomy.rdf').getroot()
     elems = root.findall('{http://www.w3.org/1999/02/22-rdf-syntax-ns#}Description')
     with open(output, 'w') as f:
-        written = f.write('\t'.join(['taxid', 'name', 'rank', 'parent_taxid']) + '\n')  # assignment to "written" stops output to console
+        written = f.write('\t'.join(
+            ['taxid', 'name', 'rank', 'parent_taxid']) + '\n')  # assignment to "written" stops output to console
         for elem in elems:
             info = [elem.get('{http://www.w3.org/1999/02/22-rdf-syntax-ns#}about').split('/')[-1]]
             scientific_name = elem.find('{http://purl.uniprot.org/core/}scientificName')
@@ -190,6 +192,7 @@ def get_tabular_taxonomy(output):
             info.append(upper_taxon.get('{http://www.w3.org/1999/02/22-rdf-syntax-ns#}resource').split('/')[-1]
                         if upper_taxon is not None else '')
             written = f.write('\t'.join(info) + '\n')
+    os.remove('taxonomy.rdf')
 
 
 def download_resources(directory, quiet=False, test_run=False):
@@ -237,17 +240,17 @@ def download_resources(directory, quiet=False, test_run=False):
     ]
     for location in web_locations:
         filename = location.split('/')[-1]
-        if filename == 'cdd.tar.gz' and test_run:       # test on github, this makes it quicker
+        if filename == 'cdd.tar.gz' and test_run:  # test on github, this makes it quicker
             os.rename('reCOGnizer/ci/cdd.tar.gz', f'{directory}/cdd.tar.gz')
             continue
         if os.path.isfile(f"{directory}/{filename}"):
             print(f"Removing {directory}/{filename}")
             os.remove(f"{directory}/{filename}")
             if quiet:
-                print(f'Downloading {location}')        # quiet replaces all wget output with this simple message
+                print(f'Downloading {location}')  # quiet replaces all wget output with this simple message
         run_command(f'wget {location} -P {directory}{" -q" if quiet else ""}')
         if filename.endswith('.gz') and not filename.endswith('.tar.gz'):
-            if os.path.isfile(f"{directory}/{filename}"[:-3]):      # filename without .gz
+            if os.path.isfile(f"{directory}/{filename}"[:-3]):  # filename without .gz
                 os.remove(f"{directory}/{filename}"[:-3])
             run_command(f'gunzip {directory}/{filename}', print_command=True)
 
@@ -258,7 +261,7 @@ def download_resources(directory, quiet=False, test_run=False):
     os.chdir(f'{directory}/smps')
     run_pipe_command(
         f'{"gtar" if sys.platform == "darwin" else "tar"} -xzf cdd.tar.gz --wildcards "*.smp"', print_command=True)
-    os.remove('cdd.tar.gz')         # no idea why I put it doing this, maybe to free space?
+    os.remove('cdd.tar.gz')  # no idea why I put it doing this, maybe to free space?
     os.chdir(wd)
     get_tabular_taxonomy(f'{directory}/taxonomy.tsv')
 
@@ -408,7 +411,7 @@ def is_db_good(database, print_warning=True):
             if print_warning:
                 print(f'{database}.{ext} not found!')
             return False
-    #print(f'{database} seems good!')
+    # print(f'{database} seems good!')
     return True
 
 
@@ -422,7 +425,7 @@ def read_ecmap(fh):
     proteins = []
     for line in fh:
         items = line.split("\t")
-        m = re.compile("EC:[1-6\\-].[0-9\\-]+.[0-9\\-]+.[0-9\\-]+").search(items[2])
+        m = re.compile(r"EC:[1-6-]\.[0-9-]+\.[0-9-]+\.[0-9-]+").search(items[2])
         try:
             ec = m.group().split(":")[1]
         except AttributeError:
@@ -487,7 +490,8 @@ def generate_cog2ec_tsv(resources_directory, output):
 def cog2ec(cogblast, resources_directory, cog2ec_tsv):
     if not os.path.isfile(cog2ec_tsv):
         generate_cog2ec_tsv(resources_directory, cog2ec_tsv)
-    cog2ec_df = pd.read_csv(cog2ec_tsv, sep='\t', names=['DB ID', 'ec_number'])     # keep the column name as "ec_number" for compatibility with the other databases
+    cog2ec_df = pd.read_csv(cog2ec_tsv, sep='\t', names=['DB ID',
+                                                         'ec_number'])  # keep the column name as "ec_number" for compatibility with the other databases
     return pd.merge(cogblast, cog2ec_df, on='DB ID', how='left')
 
 
@@ -734,7 +738,8 @@ def taxids_of_interest(tax_file, protein_id_col, tax_col, tax_df):
 def get_hmm_pgap_taxids(all_taxids, db_prefix, hmm_pgap):
     hmm_pgap = hmm_pgap[hmm_pgap['source_identifier'].str.startswith(db_prefix)]
     hmm_ids = set(hmm_pgap['taxonomic_range'])
-    all_taxids_in_hmm_pgap = [tid for tid in all_taxids if tid in hmm_ids]  # each of these parents should have a database if it is possible to have it
+    all_taxids_in_hmm_pgap = [tid for tid in all_taxids if
+                              tid in hmm_ids]  # each of these parents should have a database if it is possible to have it
     return all_taxids_in_hmm_pgap
 
 
@@ -810,7 +815,7 @@ def get_rpsbproc_info(rpsbproc_report):
 
 
 def get_db_ec(description, suffix=''):
-    m = re.compile("EC:([1-6\-].[\d\-]+.[\d\-]+.[\d\-]+)" + suffix).search(description)
+    m = re.compile(r"EC:([1-6-]\.[\d-]+\.[\d-]+\.[\d-]+)" + suffix).search(description)
     if m is None:
         return np.nan
     return m.group(1)
@@ -846,7 +851,8 @@ def taxonomic_workflow(
     dbs = {taxid: [
         f'{resources_directory}/dbs/{databases_prefixes[base]}_{parent_taxid}' for parent_taxid in
         lineages[taxid] + ['0'] if parent_taxid in taxids_with_db] for taxid in lineages.keys()}
-    dbs = {**dbs, **{'0': [f'{resources_directory}/dbs/{databases_prefixes[base]}']}}       # no taxonomy is annotated with all
+    dbs = {**dbs,
+           **{'0': [f'{resources_directory}/dbs/{databases_prefixes[base]}']}}  # no taxonomy is annotated with all
     db_report = pd.DataFrame(columns=['qseqid', 'sseqid', 'Superfamilies', 'Sites', 'Motifs'])
     for taxid in list(lineages.keys()) + ['0']:
         if os.path.isfile(f'{output}/tmp/{taxid}.fasta'):
@@ -907,12 +913,12 @@ def multiprocess_workflow(
 
 def complete_report(report, db, resources_directory, output, hmm_pgap, fun):
     cols = ['qseqid', 'DB ID', 'product_name', 'DB description', 'ec_number', 'KO', 'CDD ID', 'taxonomic_range_name',
-            'taxonomic_range', 'Superfamilies', 'Sites', 'Motifs',  'pident', 'length', 'mismatch', 'gapopen',
+            'taxonomic_range', 'Superfamilies', 'Sites', 'Motifs', 'pident', 'length', 'mismatch', 'gapopen',
             'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore']
     if db in ['CDD', 'Pfam', 'NCBIfam', 'Protein_Clusters', 'TIGRFAM']:
         report = pd.merge(report, hmm_pgap, left_on='DB ID', right_on='source_identifier', how='left')
         if db == 'CDD':
-            report['ec_number'] = report['DB description'].apply(get_db_ec, suffix="\)")
+            report['ec_number'] = report['DB description'].apply(get_db_ec, suffix=")")
     elif db == 'Smart':
         smart_table = pd.read_csv(
             f'{resources_directory}/descriptions.pl', sep='\t', skiprows=2, names=['DB ID', 'product_name'],
@@ -948,19 +954,20 @@ def organize_results(file, output, resources_directory, databases, hmm_pgap, cdd
     timed_message("Organizing annotation results")
     i = 1
     xlsx_report = pd.ExcelWriter(f'{output}/reCOGnizer_results.xlsx', engine='xlsxwriter')
-    all_reports = pd.DataFrame(columns=['qseqid', 'DB ID'])     # intialize with these columns so if it has no rows, at least it has the columns to groupby
+    all_reports = pd.DataFrame(columns=['qseqid',
+                                        'DB ID'])  # intialize with these columns so if it has no rows, at least it has the columns to groupby
     for db in databases:
         run_pipe_command(f'cat {output}/blast/{db}_*_aligned.blast', file=f'{output}/blast/{db}_aligned.blast')
         print(f'[{i}/{len(databases)}] Handling {db} annotation')
         blast_res = parse_blast(f'{output}/blast/{db}_aligned.blast')
-        if db != 'KOG':     # rpsbproc doesn't work with KOG
+        if db != 'KOG':  # rpsbproc doesn't work with KOG
             rpsbproc_res = pd.read_csv(f'{output}/rpsbproc/{db}_report.tsv', sep='\t', index_col=0)
             report = pd.merge(rpsbproc_res, blast_res, on=['qseqid', 'sseqid'], how='left')
         else:
             report = blast_res
         report = pd.merge(report, cddid, left_on='sseqid', right_on='CDD ID', how='left')
         if not no_output_sequences:
-            report = add_sequences(file, report)        # adding protein sequences if requested
+            report = add_sequences(file, report)  # adding protein sequences if requested
         report = complete_report(report, db, resources_directory, output, hmm_pgap, fun)
         report.drop_duplicates(inplace=True)
         report.to_csv(f'{output}/{db}_report.tsv', sep='\t', index=False)
@@ -984,9 +991,11 @@ def main():
         args.resources_directory, tax_file=args.tax_file)
 
     if not args.keep_spaces:
-        args.file = replace_spaces_with_underscores(args.file, f'{args.output}/tmp')        # if alters input file, internally alters args.file
+        args.file = replace_spaces_with_underscores(args.file,
+                                                    f'{args.output}/tmp')  # if alters input file, internally alters args.file
 
-    split_fasta_by_threads(args.file, f'{args.output}/tmp/tmp', args.threads)       # this splitting is always necessary, even with taxonomy inputted, since some databases don't have taxonomy-based annotation
+    split_fasta_by_threads(args.file, f'{args.output}/tmp/tmp',
+                           args.threads)  # this splitting is always necessary, even with taxonomy inputted, since some databases don't have taxonomy-based annotation
     if args.custom_databases:
         custom_database_workflow(
             args.output, args.databases, threads=args.threads, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
