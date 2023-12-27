@@ -15,6 +15,12 @@ build:
   number: 0
   run_exports:
     - { { pin_subpackage(name, max_pin="x.x") } }
+  script: >
+    mkdir -p $PREFIX/bin && 
+    mkdir -p $PREFIX/share && 
+    cp recognizer.py resources/fun.tsv resources/cog2ko.tsv resources/cog2ec_recognizer.tsv $PREFIX/share &&
+    chmod +x $PREFIX/share/recognizer.py &&
+    ln -s $PREFIX/share/keggcharter.py $PREFIX/bin/keggcharter
 
 requirements:
   run:

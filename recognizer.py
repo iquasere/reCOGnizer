@@ -24,7 +24,7 @@ from requests import get as requests_get
 import xml.etree.ElementTree as ET
 import re
 
-__version__ = '1.9.4'
+__version__ = '1.10.0'
 
 print_commands = False        # for debugging purposes, can be changed with --debug parameter
 
@@ -42,8 +42,8 @@ def get_arguments():
     parser.add_argument(
         "-o", "--output", help="Output directory [reCOGnizer_results]", default='reCOGnizer_results')
     parser.add_argument(
-        "-dr", "--download-resources", default=False, action="store_true",
-        help='If resources for reCOGnizer are not available at "resources_directory" [false]')
+        "-dr", "--download-resources", default=None,
+        help='This parameter is deprecated. Please do not use it [None]')
     parser.add_argument(
         "-rd", "--resources-directory", default=os.path.expanduser('~/recognizer_resources'),
         help="Output directory for storing databases and other resources [~/recognizer_resources]")
@@ -68,8 +68,8 @@ def get_arguments():
         "--no-blast-info", action="store_true", default=False,
         help="Information from the alignment will be stored in their own columns.")
     parser.add_argument(
-        "-sd", "--skip-downloaded", action="store_true", default=False,
-        help="Skip download of resources detected as already downloaded.")
+        "-sd", "--skip-downloaded", default=None,
+        help="This parameter is deprecated. Please do not use it [None]")
     parser.add_argument(
         "--keep-intermediates", default=False, action='store_true',
         help="Keep intermediate annotation files generated in reCOGnizer's workflow, "
@@ -98,6 +98,15 @@ def get_arguments():
         help="If tax col contains Tax IDs of species (required for running COG taxonomic)")
 
     args = parser.parse_args()
+
+    # Check for deprecated parameters. reCOGnizer will still fail, but it will inform on them.
+    for param in ['skip_downloaded', 'download_resources']:     # deprecated_db_params
+        if getattr(args, param):
+            sys.exit(f"""Error: The parameter '--{param.replace("_", "-")}' is deprecated and no longer 
+            needed. If you have already downloaded resources for version 1.10 and forward, just remove this
+            parameter. If not, please remove the file at '[resources_directory]/recognizer_dwnl.timestamp', and 
+            reCOGnizer will re-download everything correctly. From now on, reCOGnizer relies on the timestamp to know 
+            if databases have been correctly downloaded.""")
 
     args.output = args.output.rstrip('/')
     args.resources_directory = args.resources_directory.rstrip('/')
@@ -179,11 +188,22 @@ def get_tabular_taxonomy(output):
             written = f.write('\t'.join(info) + '\n')
 
 
-def download_resources(directory, quiet=False, skip_downloaded=False):
+def download_resources(directory, quiet=False):
+    timestamp_file = f'{directory}/recognizer_dwnl.timestamp'
+    if os.path.isfile(timestamp_file):
+        with open(timestamp_file) as f:
+            timed_message(f'Download timestamp found. Files were downloaded at {f.read()}')
+        return
+    timed_message(
+        f"Didn't found the timestamp file [{directory}/recognizer_dwnl.timestamp], going to download resources.")
+    if sys.platform == "darwin":
+        if which('gtar') is None:
+            sys.exit('System is darwin, and gnu-tar was not found. You can install gnu-tar with: brew install gnu-tar')
+
     if not os.path.isdir(f'{directory}/smps'):
         Path(f'{directory}/smps').mkdir(parents=True, exist_ok=True)
         print(f'Created {directory}/smps')
-    for location in [
+    web_locations = [
         # Download CDD
         'ftp://ftp.ncbi.nih.gov/pub/mmdb/cdd/cdd.tar.gz',
         'https://ftp.ncbi.nlm.nih.gov/pub/mmdb/cdd/cddid_all.tbl.gz',
@@ -201,52 +221,42 @@ def download_resources(directory, quiet=False, skip_downloaded=False):
         # COG2EC
         'http://eggnogdb.embl.de/download/eggnog_4.5/eggnog4.protein_id_conversion.tsv.gz',
         'http://eggnogdb.embl.de/download/eggnog_4.5/data/NOG/NOG.members.tsv.gz',
+        # COG2KO
+        'https://stringdb-static.org/download/COG.mappings.v11.0.txt.gz',
+        'https://stringdb-static.org/download/protein.info.v11.0.txt.gz',
         # NCBIfam, TIGRFAM, Pfam, PRK (protein clusters)
         'https://ftp.ncbi.nlm.nih.gov/hmm/4.0/hmm_PGAP.tsv',
         # SMART
         'https://smart.embl.de/smart/descriptions.pl',
         # KOG
         'https://ftp.ncbi.nlm.nih.gov/pub/COG/KOG/kog'
-    ]:
-        if os.path.isfile(f"{directory}/{location.split('/')[-1]}"):
-            if not skip_downloaded:
-                download = str2bool(input(f"{directory}/{location.split('/')[-1]} exists. Overwrite? [Y/N] "))
-            else:
-                download = False
-        else:
-            download = True
-        if download:
+    ]
+    for location in web_locations:
+        filename = location.split('/')[-1]
+        if os.path.isfile(f"{directory}/{filename}"):
+            print(f"Removing {directory}/{filename}")
+            os.remove(f"{directory}/{filename}")
             if quiet:
                 print(f'Downloading {location}')        # quiet replaces all wget output with this simple message
-            run_command(f'wget {location} -P {directory}{" -q" if quiet else ""}')
-
-    if os.path.isfile(f'{directory}/cdd.tar.gz'):
-        os.rename(f'{directory}/cdd.tar.gz', f'{directory}/smps/cdd.tar.gz')
-
-    for file in [
-        'cddid_all.tbl', 'eggnog4.protein_id_conversion.tsv', 'NOG.members.tsv', 'cddannot.dat',
-            'cddannot_generic.dat', 'cddid.tbl']:
-        if not (skip_downloaded and os.path.isfile(f'{directory}/{file}')):
-            run_command(f'gunzip {directory}/{file}.gz', print_command=True)
+        run_command(f'wget {location} -P {directory}{" -q" if quiet else ""}')
+        if filename.endswith('.gz') and not filename.endswith('.tar.gz'):
+            if os.path.isfile(f"{directory}/{filename}"[:-3]):      # filename without .gz
+                os.remove(f"{directory}/{filename}"[:-3])
+            run_command(f'gunzip {directory}/{filename}', print_command=True)
 
     # Extract the smps
-    if sys.platform == "darwin":
-        if which('gtar') is None:
-            run_command('brew install gnu-tar', print_command=True)
-        tool = 'gtar'
-    else:
-        tool = 'tar'
+    if os.path.isfile(f'{directory}/cdd.tar.gz'):
+        os.rename(f'{directory}/cdd.tar.gz', f'{directory}/smps/cdd.tar.gz')
     wd = os.getcwd()
     os.chdir(f'{directory}/smps')
-    run_pipe_command(f'{tool} -xzf cdd.tar.gz --wildcards "*.smp"', print_command=True)
-    os.remove('cdd.tar.gz')
+    run_pipe_command(
+        f'{"gtar" if sys.platform == "darwin" else "tar"} -xzf cdd.tar.gz --wildcards "*.smp"', print_command=True)
+    os.remove('cdd.tar.gz')         # no idea why I put it doing this, maybe to free space?
     os.chdir(wd)
     get_tabular_taxonomy(f'{directory}/taxonomy.tsv')
+
     with open(f'{directory}/recognizer_dwnl.timestamp', 'w') as f:
         f.write(strftime("%Y-%m-%d %H:%M:%S", gmtime()))
-
-    generate_cog2ec_df(
-        f'{directory}/eggnog4.protein_id_conversion.tsv', f'{directory}/NOG.members.tsv', directory)
 
 
 def str2bool(v):
@@ -394,31 +404,113 @@ def is_db_good(database, print_warning=True):
     return True
 
 
-def cog2ec(cogblast, table=f'{sys.path[0]}/resources_directory/cog2ec.tsv'):
-    return pd.merge(cogblast, pd.read_csv(table, sep='\t', names=['DB ID', 'ec_number']), on='DB ID', how='left')
+# ===========================
+# COG to EC number conversion
+# ===========================
 
 
-def cog2ko(cogblast, cog2ko_ssv=f'{sys.path[0]}/resources_directory/cog2ko.ssv'):
-    if not os.path.isfile(cog2ko_ssv):
-        print('cog2ko not found! Going to build it')
-        directory = '/'.join(cog2ko_ssv.split('/')[:-1])
-        web_locations = {
-            'COG.mappings.v11.0.txt': 'https://stringdb-static.org/download/COG.mappings.v11.0.txt.gz',
-            'protein.info.v11.0.txt': 'https://stringdb-static.org/download/protein.info.v11.0.txt.gz'}
-        for file, link in web_locations.items():
-            if not os.path.isfile(f'{directory}/{file}'):
-                run_command(f'wget -P {directory} {link} -q')
-                run_command(f'gunzip {directory}/{file}.gz')
-        run_pipe_command(
-            f"grep -E 'K[0-9]{{5}}$' {directory}/protein.info.v11.0.txt | awk '{{if (length($NF) == 6) print $1, $NF}}'",
-            file=f'{directory}/string2ko.tsv')
-        run_pipe_command(
-            """awk '{{if (length($4) == 7) print $1"\t"$4}}' {0}/COG.mappings.v11.0.txt | sort | 
-            join - {0}/string2ko.tsv""".format(directory), file=f'{directory}/cog2ko.ssv')
-        df = pd.read_csv(f'{directory}/cog2ko.ssv', sep=' ', names=['StringDB', 'COG', 'KO'])
-        df[['COG', 'KO']].groupby('COG')['KO'].agg([('KO', lambda x: ';'.join(set(x)))]).reset_index().to_csv(
-            f'{directory}/cog2ko.tsv', sep='\t', index=False, header=['DB ID', 'KO'])
-    return pd.merge(cogblast, pd.read_csv(cog2ko_ssv, sep='\t'), on='DB ID', how='left')
+def read_ecmap(fh):
+    enzymes = []
+    proteins = []
+    for line in fh:
+        items = line.split("\t")
+        m = re.compile("EC:[1-6\-].[0-9\-]+.[0-9\-]+.[0-9\-]+").search(items[2])
+        try:
+            ec = m.group().split(":")[1]
+        except AttributeError:
+            continue
+        member = f"{items[0]}.{items[1]}"
+        proteins.append(member)
+        enzymes.append(ec)
+    return enzymes, proteins
+
+
+def ecmap(ec_file):
+    with open(ec_file) as handler:
+        enzymes, proteins = read_ecmap(handler)
+    return enzymes, proteins
+
+
+def read_cogmap(cogmap_handler):
+    cogs = []
+    proteins = []
+    for line in cogmap_handler:
+        items = line.split("\t")
+        prots = items[-1].split(",")
+        cog = [items[1]] * len(prots)
+        cogs += cog
+        proteins += prots
+    return cogs, proteins
+
+
+def cogmap(file):
+    with open(file) as handler:
+        cogs, proteins = read_cogmap(handler)
+    return cogs, proteins
+
+
+def determine_cog2ec(map_df, frac=0.5):
+    # Group by cog and enzyme to get number of each EC assignment per cog
+    map_df_counts = map_df.groupby(["enzyme", "cog"]).count().reset_index()
+    map_df_counts.index = map_df_counts.cog
+    map_df_counts.drop("cog", axis=1, inplace=True)
+    map_df_counts.sort_index(inplace=True)
+    # Count total number of proteins per cog
+    cog_counts = map_df_counts.groupby(level=0).sum(numeric_only=True)
+    # Divide enzyme assignment number by total protein number to get fraction of each assignment
+    ecfrac = map_df_counts.protein.div(cog_counts.protein).reset_index()
+    # Get index of where fraction is above threshold
+    index = ecfrac.loc[ecfrac.protein >= frac].index
+    # Return mappings where fraction is above threshold
+    return map_df_counts.iloc[index]
+
+
+def generate_cog2ec_tsv(resources_directory, output):
+    timed_message("Generating COG to EC mapping")
+    enzymes, proteins = ecmap(f'{resources_directory}/eggnog4.protein_id_conversion.tsv')
+    ecmap_df = pd.DataFrame(data={"enzyme": enzymes, "protein": proteins})
+    cogs, proteins = cogmap(f'{resources_directory}/NOG.members.tsv')
+    cogmap_df = pd.DataFrame(data={"cog": cogs, "protein": proteins})
+    map_df = pd.merge(ecmap_df, cogmap_df, left_on="protein", right_on="protein")
+    cog2ec_df = determine_cog2ec(map_df)
+    cog2ec_df.loc[:, "enzyme"].to_csv(output, sep="\t")
+
+
+def cog2ec(cogblast, resources_directory, cog2ec_tsv):
+    if not os.path.isfile(cog2ec_tsv):
+        generate_cog2ec_tsv(resources_directory, cog2ec_tsv)
+    cog2ec_df = pd.read_csv(cog2ec_tsv, sep='\t', names=['DB ID', 'ec_number'])     # keep the column name as "ec_number" for compatibility with the other databases
+    return pd.merge(cogblast, cog2ec_df, on='DB ID', how='left')
+
+
+# ===========================
+# COG to KO conversion
+# ===========================
+
+
+def generate_cog2ko_tsv(resources_directory, output, threshold=0.5):
+    timed_message('Generating COG to KO mapping')
+    run_pipe_command(
+        f"grep -E 'K[0-9]{{5}}$' {resources_directory}/protein.info.v11.0.txt | "
+        f"awk '{{if (length($NF) == 6) print $1, $NF}}'", file=f'{resources_directory}/string2ko.ssv')
+    run_pipe_command(
+        """awk '{{if (length($4) == 7) print $1" "$4}}' {0}/COG.mappings.v11.0.txt""",
+        file=f'{resources_directory}/string2cog.ssv')
+    df1 = pd.read_csv(f'{resources_directory}/string2ko.ssv', sep=' ', names=['StringDB', 'KO'])
+    df2 = pd.read_csv(f'{resources_directory}/string2cog.ssv', sep=' ', names=['StringDB', 'COG'])
+    df_merged = pd.merge(df1, df2, on='StringDB', how='inner')
+    total_counts = df_merged['COG'].value_counts()
+    percentages = df_merged.groupby('COG')['KO'].value_counts() / total_counts
+    percentages[percentages > threshold].index.to_frame(index=False).to_csv(output, sep='\t', index=False)
+    for file in ['cog2ko.ssv', 'string2ko.tsv']:
+        os.remove(f'{resources_directory}/{file}')
+
+
+def cog2ko(cogblast, resources_directory, cog2ko_tsv=f'{sys.path[0]}/cog2ko_recognizer.tsv'):
+    if not os.path.isfile(cog2ko_tsv):
+        generate_cog2ko_tsv(resources_directory, cog2ko_tsv)
+    cog2ko_df = pd.read_csv(cog2ko_tsv, sep='\t', names=['DB ID', 'KO'])
+    return pd.merge(cogblast, cog2ko_df, on='DB ID', how='left')
 
 
 def write_table(table, output, out_format='excel', header=True):
@@ -833,9 +925,9 @@ def complete_report(report, db, resources_directory, output, hmm_pgap, fun):
         cog_table = pd.merge(cog_table, fun, on='Functional category (letter)', how='left')
         report = pd.merge(report, cog_table, on='DB ID', how='left')
         # cog2ec
-        report = cog2ec(report, table=f'{resources_directory}/cog2ec.tsv')
+        report = cog2ec(report, resources_directory, cog2ec_tsv=f'{sys.path[0]}/cog2ec_recognizer.tsv')
         # cog2ko
-        report = cog2ko(report, cog2ko_ssv=f'{resources_directory}/cog2ko.tsv')
+        report = cog2ko(report, resources_directory, cog2ko_tsv=f'{sys.path[0]}/cog2ko_recognizer.tsv')
         if len(report) > 0:
             write_cog_categories(report, f'{output}/COG')
     else:
@@ -872,83 +964,10 @@ def organize_results(file, output, resources_directory, databases, hmm_pgap, cdd
     xlsx_report.close()
 
 
-def read_ecmap(fh):
-    enzymes = []
-    proteins = []
-    for line in fh:
-        items = line.split("\t")
-        m = re.compile("EC:[1-6\-].[0-9\-]+.[0-9\-]+.[0-9\-]+").search(items[2])
-        try:
-            ec = m.group().split(":")[1]
-        except AttributeError:
-            continue
-        member = f"{items[0]}.{items[1]}"
-        proteins.append(member)
-        enzymes.append(ec)
-    return enzymes, proteins
-
-
-def ecmap(ec_file):
-    with open(ec_file) as handler:
-        enzymes, proteins = read_ecmap(handler)
-    return enzymes, proteins
-
-
-def read_cogmap(cogmap_handler):
-    cogs = []
-    proteins = []
-    for line in cogmap_handler:
-        items = line.split("\t")
-        prots = items[-1].split(",")
-        cog = [items[1]] * len(prots)
-        cogs += cog
-        proteins += prots
-    return cogs, proteins
-
-
-def cogmap(file):
-    with open(file) as handler:
-        cogs, proteins = read_cogmap(handler)
-    return cogs, proteins
-
-
-def determine_cog2ec(map_df, frac=0.5):
-    # Group by cog and enzyme to get number of each EC assignment per cog
-    map_df_counts = map_df.groupby(["enzyme", "cog"]).count().reset_index()
-    map_df_counts.index = map_df_counts.cog
-    map_df_counts.drop("cog", axis=1, inplace=True)
-    map_df_counts.sort_index(inplace=True)
-    # Count total number of proteins per cog
-    cog_counts = map_df_counts.groupby(level=0).sum(numeric_only=True)
-    # Divide enzyme assignment number by total protein number to get fraction of each assignment
-    ecfrac = map_df_counts.protein.div(cog_counts.protein).reset_index()
-    # Get index of where fraction is above threshold
-    index = ecfrac.loc[ecfrac.protein >= frac].index
-    # Return mappings where fraction is above threshold
-    return map_df_counts.iloc[index]
-
-
-def generate_cog2ec_df(conversion, members, resources_directory):
-    timed_message("Generating COG to EC mapping")
-    enzymes, proteins = ecmap(conversion)
-    ecmap_df = pd.DataFrame(data={"enzyme": enzymes, "protein": proteins})
-    cogs, proteins = cogmap(members)
-    cogmap_df = pd.DataFrame(data={"cog": cogs, "protein": proteins})
-    map_df = pd.merge(ecmap_df, cogmap_df, left_on="protein", right_on="protein")
-    cog2ec_df = determine_cog2ec(map_df)
-    cog2ec_df.loc[:, "enzyme"].to_csv(f'{resources_directory}/cog2ec.tsv', sep="\t")
-
-
 def main():
     args = get_arguments()
 
-    if not os.path.isfile(f'{args.resources_directory}/recognizer_dwnl.timestamp') and not args.download_resources:
-        args.download_resources = str2bool(input(
-            'Resources seem to not have been downloaded for reCOGnizer yet. Do you want to download them? [Y/N] '))
-
-    if args.download_resources:
-        download_resources(
-            args.resources_directory, quiet=args.quiet, skip_downloaded=args.skip_downloaded)
+    download_resources(args.resources_directory, quiet=args.quiet)
 
     if not args.file:
         exit('No input file specified. Exiting.')
