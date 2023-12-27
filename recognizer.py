@@ -279,8 +279,9 @@ def str2bool(v):
 
 def run_rpsblast(query, output, reference, threads='0', max_target_seqs=1, evalue=1e-2, outfmt=11):
     # This run_command is different because of reference, which can't be split by space
-    bash_command = f'rpsblast -query {query} -db "{reference}" -out {output} -outfmt {outfmt} -num_threads {threads} ' \
-                   f'-max_target_seqs {max_target_seqs} -evalue {evalue} 1>recognizer.log 2>recognizer.log'
+    bash_command = (
+        f'rpsblast -query {query} -db "{reference}" -out {output} -outfmt {outfmt} -num_threads {threads} '
+        f'-max_target_seqs {max_target_seqs} -evalue {evalue}')
     run_pipe_command(bash_command)
 
 
@@ -421,7 +422,7 @@ def read_ecmap(fh):
     proteins = []
     for line in fh:
         items = line.split("\t")
-        m = re.compile("EC:[1-6\-].[0-9\-]+.[0-9\-]+.[0-9\-]+").search(items[2])
+        m = re.compile("EC:[1-6\\-].[0-9\\-]+.[0-9\\-]+.[0-9\\-]+").search(items[2])
         try:
             ec = m.group().split(":")[1]
         except AttributeError:
@@ -509,7 +510,7 @@ def generate_cog2ko_tsv(resources_directory, output, threshold=0.5):
     total_counts = df_merged['COG'].value_counts()
     percentages = df_merged.groupby('COG')['KO'].value_counts() / total_counts
     percentages[percentages > threshold].index.to_frame(index=False).to_csv(output, sep='\t', index=False)
-    for file in ['cog2ko.ssv', 'string2ko.tsv']:
+    for file in ['string2ko.ssv', 'string2cog.ssv']:
         os.remove(f'{resources_directory}/{file}')
 
 
