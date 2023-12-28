@@ -15,33 +15,22 @@ A tool for domain-based annotation with databases from the [Conserved Domains Da
 
 reCOGnizer performs domain-based annotation with RPS-BLAST and databases from CDD as reference.
 * Reference databases currently implemented: CDD, NCBIfam, Pfam, TIGRFAM, Protein Clusters, SMART, COG and KOG.
-* reCOGnizer builds split versions of these databases with which RPS-BLAST can run in multithread, significantly increasing the speed of annotation.
+* reCOGnizer performs multithread annotation with RPS-BLAST, significantly increasing the speed of annotation.
 * After domain assignment to proteins, reCOGnizer converts CDD IDs to the IDs of the respective DBs, and obtains domain descriptions available at CDD.
 * Further information is retrieved depending on the database in question:
-    * NCBIfam, Pfam, TIGRFAM and Protein Clusters annotations are complemented with taxonomic classifications and EC numbers
-    * SMART annotations are complemented with SMART descriptions
-    * COG and KOG annotations are complemented with COG categories and EC numbers and KEGG Orthologs (for COG)
+    * NCBIfam, Pfam, TIGRFAM and Protein Clusters annotations are complemented with taxonomic classifications and EC numbers.
+    * SMART annotations are complemented with SMART descriptions.
+    * COG and KOG annotations are complemented with COG/KOG categories, EC numbers and KEGG Orthologs.
 
 A detailed representation of reCOGnizer's workflow is presented in Fig. 1.
 
-![ScreenShot](recognizer_workflow.jpg)
-Fig. 1. Workflow of reGOGnizer, which includes the pre-analysis step of constructing databases, the domain-based annotation of inputted protein sequences, the interconversion of CDD IDs to other databases IDs, the ID mapping through several databases for obtaining information about the obtained IDs, and the output of information into TSV, Excel and HTML reports.
-
 ## Installing reCOGnizer
 
-To install reCOGnizer, simply run: ```conda install -c conda-forge -c bioconda recognizer```
-
-### From source
-
-reCOGnizer can also be installed from source by running:
-```
-git clone https://github.com/iquasere/reCOGnizer.git
-sudo reCOGnizer/install.bash
-```
-
-To test that reCOGnizer was correctly installed, run: ```recognizer -v```
+To install reCOGnizer, simply run: `conda install -c conda-forge -c bioconda recognizer`
 
 ## Setup the databases
+
+THIS INFORMATION IS DEPRECATED SINCE RECOGNIZER 1.10. Databases are now installed automatically considering the `recognizer_dwnl.timestamp` file available in whatever the `resources_directory` folder is (by default, `~/recognizer_resources`).
 
 reCOGnizer requires the databases from CDD and other resources from multiple sources to be downloaded before running.
 This can be accomplished by running: 
@@ -56,18 +45,17 @@ By default (if a value is not specified), these resources will be stored in the 
 
 The simplest way to run reCOGnizer is to just specify the fasta filename and an output directory - though even the output directory is not mandatory.
 ```
-recognizer -f input_file.fasta -o output_directory --resources-directory resources_directory
+recognizer -f input_file.faa -o output_directory --resources-directory resources_directory
 ```
-Do note the `--resources-directory` argument is only necessary if the resources were downloaded to a different location than the default, 
-in which case the folder specified must be the same as the one used in the download step.
+Do note the `--resources-directory` argument is only necessary if the databases were/are to be downloaded to a different location other than the default (`~/recognizer_resources`).
 
 ## Output
 
-reCOGnizer takes a FASTA file as input and produces two main outputs into the output directory:
+reCOGnizer takes a FASTA file (of aminoacids, commonly either `.fasta` or `.faa`) as input and produces two main outputs into the output directory:
 * ```reCOGnizer_results.tsv```, a table with the annotations for each protein
-* ```cog_quantification``` and respective Krona representation (Fig. 2), which describes the functional landscape of the proteins in the input file
+* ```cog_quantification.tsv``` and respective Krona representation (Fig. 2), which describes the functional landscape of the proteins in the input file
 
-[![Image Alt Text](krona_plot.png)](https://iquasere.github.io/reCOGnizer)
+[![Image Alt Text](resources/krona_plot.png)](https://iquasere.github.io/reCOGnizer)
 
 Fig. 2. Krona plot with the quantification of COGs identified in the simulated dataset used to test [MOSCA](https://github.com/iquasere/MOSCA) and reCOGnizer. Click in the plot to see the interactive version that is outputed by reCOGnizer.
 
@@ -94,23 +82,28 @@ options:
   --evalue EVALUE       Maximum e-value to report annotations for [1e-3]
   -o OUTPUT, --output OUTPUT
                         Output directory [reCOGnizer_results]
-  -dr, --download-resources
-                        If resources for reCOGnizer are not available at "resources_directory" [false]
+  -dr DOWNLOAD_RESOURCES, --download-resources DOWNLOAD_RESOURCES
+                        This parameter is deprecated. Please do not use it [None]
   -rd RESOURCES_DIRECTORY, --resources-directory RESOURCES_DIRECTORY
                         Output directory for storing databases and other resources [~/recognizer_resources]
   -dbs DATABASES, --databases DATABASES
                         Databases to include in functional annotation (comma-separated) [all available]
-  --custom-databases    If databases inputted were NOT produced by reCOGnizer. Default databases of reCOGnizer (e.g., COG, TIGRFAM, ...) can't be used simultaneously with custom databases.
+  --custom-databases    If databases inputted were NOT produced by reCOGnizer [False]. Default databases of reCOGnizer (e.g., COG, TIGRFAM, ...) can't be used simultaneously with custom
+                        databases. Use together with the '--databases' parameter.
   -mts MAX_TARGET_SEQS, --max-target-seqs MAX_TARGET_SEQS
                         Number of maximum identifications for each protein [1]
   --keep-spaces         BLAST ignores sequences IDs after the first space. This option changes all spaces to underscores to keep the full IDs.
   --no-output-sequences
                         Protein sequences from the FASTA input will be stored in their own column.
   --no-blast-info       Information from the alignment will be stored in their own columns.
-  --quiet               Don't output download information, used mainly for CI.
-  -sd, --skip-downloaded
-                        Skip download of resources detected as already downloaded.
+  --output-rpsbproc-cols
+                        Output columns obtained with RPSBPROC - 'Superfamilies', 'Sites' and 'Motifs'.
+  -sd SKIP_DOWNLOADED, --skip-downloaded SKIP_DOWNLOADED
+                        This parameter is deprecated. Please do not use it [None]
   --keep-intermediates  Keep intermediate annotation files generated in reCOGnizer's workflow, i.e., ASN, RPSBPROC and BLAST reports and split FASTA inputs.
+  --quiet               Don't output download information, used mainly for CI.
+  --debug               Print all commands running in the background, including those of rpsblast and rpsbproc.
+  --test-run            This parameter is only appropriate for reCOGnizer's tests on GitHub. Should not be used.
   -v, --version         show program's version number and exit
 
 Taxonomy Arguments:
