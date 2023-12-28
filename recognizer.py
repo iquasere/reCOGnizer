@@ -8,7 +8,6 @@ Nov 2019
 """
 
 import shutil
-import warnings
 from argparse import ArgumentParser, ArgumentTypeError
 from glob import glob
 import os
@@ -69,6 +68,9 @@ def get_arguments():
     parser.add_argument(
         "--no-blast-info", action="store_true", default=False,
         help="Information from the alignment will be stored in their own columns.")
+    parser.add_argument(
+        "--output-rpsbproc-cols", action="store_true", default=False,
+        help="Output columns obtained with RPSBPROC - 'Superfamilies', 'Sites' and 'Motifs'.")
     parser.add_argument(
         "-sd", "--skip-downloaded", default=None,
         help="This parameter is deprecated. Please do not use it [None]")
@@ -134,7 +136,7 @@ def get_arguments():
 
     if args.file:
         for directory in [f'{args.output}/{folder}' for folder in ['asn', 'blast', 'rpsbproc', 'tmp']] + [
-            f'{args.resources_directory}/dbs']:
+                f'{args.resources_directory}/dbs']:
             if not os.path.isdir(directory):
                 Path(directory).mkdir(parents=True, exist_ok=True)
                 print(f'Created {directory}')
@@ -246,8 +248,7 @@ def download_resources(directory, quiet=False, test_run=False):
         if os.path.isfile(f"{directory}/{filename}"):
             print(f"Removing {directory}/{filename}")
             os.remove(f"{directory}/{filename}")
-            if quiet:
-                print(f'Downloading {location}')  # quiet replaces all wget output with this simple message
+        print(f'Downloading {location}')
         run_command(f'wget {location} -P {directory}{" -q" if quiet else ""}')
         if filename.endswith('.gz') and not filename.endswith('.tar.gz'):
             if os.path.isfile(f"{directory}/{filename}"[:-3]):  # filename without .gz
@@ -950,18 +951,21 @@ def complete_report(report, db, resources_directory, output, hmm_pgap, fun):
     return report[cols].rename(columns={'product_name': 'Protein description', 'ec_number': 'EC number'})
 
 
-def organize_results(file, output, resources_directory, databases, hmm_pgap, cddid, fun, no_output_sequences=False):
+def organize_results(
+        file, output, resources_directory, databases, hmm_pgap, cddid, fun, no_output_sequences=False,
+        include_rpsbproc_cols=False):
     timed_message("Organizing annotation results")
     i = 1
     xlsx_report = pd.ExcelWriter(f'{output}/reCOGnizer_results.xlsx', engine='xlsxwriter')
-    all_reports = pd.DataFrame(columns=['qseqid',
-                                        'DB ID'])  # intialize with these columns so if it has no rows, at least it has the columns to groupby
+    all_reports = pd.DataFrame(columns=['qseqid', 'DB ID'])     # intialize with these columns so if it has no rows, at least it has the columns to groupby
     for db in databases:
         run_pipe_command(f'cat {output}/blast/{db}_*_aligned.blast', file=f'{output}/blast/{db}_aligned.blast')
         print(f'[{i}/{len(databases)}] Handling {db} annotation')
         blast_res = parse_blast(f'{output}/blast/{db}_aligned.blast')
         if db != 'KOG':  # rpsbproc doesn't work with KOG
             rpsbproc_res = pd.read_csv(f'{output}/rpsbproc/{db}_report.tsv', sep='\t', index_col=0)
+            if not include_rpsbproc_cols:
+                rpsbproc_res.drop(columns=['Superfamilies', 'Sites', 'Motifs'], inplace=True)
             report = pd.merge(rpsbproc_res, blast_res, on=['qseqid', 'sseqid'], how='left')
         else:
             report = blast_res
@@ -990,12 +994,12 @@ def main():
     cddid, hmm_pgap, fun, taxonomy_df, members_df = load_relational_tables(
         args.resources_directory, tax_file=args.tax_file)
 
-    if not args.keep_spaces:
-        args.file = replace_spaces_with_underscores(args.file,
-                                                    f'{args.output}/tmp')  # if alters input file, internally alters args.file
+    if not args.keep_spaces:       # if alters input file, internally alters args.file
+        args.file = replace_spaces_with_underscores(args.file, f'{args.output}/tmp')
 
-    split_fasta_by_threads(args.file, f'{args.output}/tmp/tmp',
-                           args.threads)  # this splitting is always necessary, even with taxonomy inputted, since some databases don't have taxonomy-based annotation
+    # this splitting is always necessary, even with taxonomy inputted, since some databases don't have taxonomy-based
+    # annotation. And it keeps things simpler.
+    split_fasta_by_threads(args.file, f'{args.output}/tmp/tmp', args.threads)
     if args.custom_databases:
         custom_database_workflow(
             args.output, args.databases, threads=args.threads, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
@@ -1009,6 +1013,8 @@ def main():
                 if os.path.isfile(f'{args.output}/tmp/{taxid}.fasta'):
                     split_fasta_by_threads(
                         f'{args.output}/tmp/{taxid}.fasta', f'{args.output}/tmp/tmp_{taxid}', args.threads)
+        else:
+            tax_file = lineages = all_taxids = None
         databases_prefixes = {
             'CDD': 'cd', 'Pfam': 'pfam', 'NCBIfam': 'NF', 'Protein_Clusters': 'PRK', 'Smart': 'smart',
             'TIGRFAM': 'TIGR', 'COG': 'COG', 'KOG': 'KOG'}
@@ -1029,7 +1035,7 @@ def main():
                     max_target_seqs=args.max_target_seqs, evalue=args.evalue)
         organize_results(
             args.file, args.output, args.resources_directory, args.databases, hmm_pgap, cddid, fun,
-            no_output_sequences=args.no_output_sequences)
+            no_output_sequences=args.no_output_sequences, include_rpsbproc_cols=args.output_rpsbproc_cols)
         if not args.keep_intermediates:
             for directory in [f'{args.output}/{folder}' for folder in ['asn', 'blast', 'rpsbproc', 'tmp']]:
                 shutil.rmtree(directory)
