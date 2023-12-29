@@ -24,7 +24,7 @@ from requests import get as requests_get
 import xml.etree.ElementTree as ET
 import re
 
-__version__ = '1.10.0'
+__version__ = '1.10.1'
 
 print_commands = False  # for debugging purposes, can be changed with --debug parameter
 
