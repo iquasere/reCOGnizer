@@ -243,7 +243,7 @@ def download_resources(directory, quiet=False, test_run=False):
     for location in web_locations:
         filename = location.split('/')[-1]
         if filename == 'cdd.tar.gz' and test_run:  # test on github, this makes it quicker
-            os.rename('reCOGnizer/ci/cdd.tar.gz', f'{directory}/cdd.tar.gz')
+            os.rename('reCOGnizer/cicd/cdd.tar.gz', f'{directory}/cdd.tar.gz')
             continue
         if os.path.isfile(f"{directory}/{filename}"):
             print(f"Removing {directory}/{filename}")
@@ -816,7 +816,7 @@ def get_rpsbproc_info(rpsbproc_report):
 
 
 def get_db_ec(description, suffix=''):
-    m = re.compile(r"EC:([1-6-]\.[\d-]+\.[\d-]+\.[\d-]+)" + suffix).search(description)
+    m = re.compile(r"EC:([1-6-]\.[\d-]+\.[\d-]+\.[\d-]+)" + re.escape(suffix)).search(description)
     if m is None:
         return np.nan
     return m.group(1)
