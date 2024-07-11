@@ -4,7 +4,6 @@ A tool for domain-based annotation with databases from the [Conserved Domains Da
 
 * [Features](https://github.com/iquasere/reCOGnizer#features)
 * [Installing reCOGnizer](https://github.com/iquasere/reCOGnizer#installing-recognizer)
-* [Setup the databases](https://github.com/iquasere/reCOGnizer#setup-the-databases)
 * [Annotation with reCOGnizer](https://github.com/iquasere/reCOGnizer#annotation-with-recognizer)
 * [Output](https://github.com/iquasere/reCOGnizer#output)
 * [Other parameters](https://github.com/iquasere/reCOGnizer#other-parameters)
@@ -28,31 +27,17 @@ A detailed representation of reCOGnizer's workflow is presented in Fig. 1.
 
 To install reCOGnizer, simply run: `conda install -c conda-forge -c bioconda recognizer`
 
-## Setup the databases
-
-THIS INFORMATION IS DEPRECATED SINCE RECOGNIZER 1.10. Databases are now installed automatically considering the `recognizer_dwnl.timestamp` file available in whatever the `resources_directory` folder is (by default, `~/recognizer_resources`).
-
-reCOGnizer requires the databases from CDD and other resources from multiple sources to be downloaded before running.
-This can be accomplished by running: 
-```
-recognizer --download-resources --resources-directory resources_directory
-```
-where `resources_directory` is the directory where the resources will be stored. 
-
-By default (if a value is not specified), these resources will be stored in the user's home, but because of their large size, it might be preferable to specify other location.
-
 ## Annotation with reCOGnizer
 
 The simplest way to run reCOGnizer is to just specify the fasta filename and an output directory - though even the output directory is not mandatory.
 ```
-recognizer -f input_file.faa -o output_directory --resources-directory resources_directory
+recognizer -f input_file.faa -o output_directory
 ```
-Do note the `--resources-directory` argument is only necessary if the databases were/are to be downloaded to a different location other than the default (`~/recognizer_resources`).
 
 ## Output
 
 reCOGnizer takes a FASTA file (of aminoacids, commonly either `.fasta` or `.faa`) as input and produces two main outputs into the output directory:
-* ```reCOGnizer_results.tsv```, a table with the annotations for each protein
+* ```reCOGnizer_results.tsv``` and ```reCOGnizer_results.xlsx```, tables with the annotations from every database for each protein
 * ```cog_quantification.tsv``` and respective Krona representation (Fig. 2), which describes the functional landscape of the proteins in the input file
 
 [![Image Alt Text](resources/krona_plot.png)](https://iquasere.github.io/reCOGnizer)
