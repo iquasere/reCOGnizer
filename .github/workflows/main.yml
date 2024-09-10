@@ -41,7 +41,7 @@ jobs:
           docker load --input /tmp/recognizer.tar
           docker image ls -a
       - name: Default annotation
-        run: docker run recognizer /bin/bash -c "recognizer -f reCOGnizer/cicd/proteomes.fasta -rd resources_directory --quiet -dbs COG,TIGRFAM --test-run"
+        run: docker run recognizer /bin/bash -c "recognizer -f reCOGnizer/cicd/genes.fasta -rd resources_directory --quiet -dbs COG,TIGRFAM --test-run"
 
   taxonomy-based-annotation:
     runs-on: ubuntu-latest
@@ -57,7 +57,7 @@ jobs:
           docker load --input /tmp/recognizer.tar
           docker image ls -a
       - name: Taxonomy-based annotation
-        run: docker run recognizer /bin/bash -c "recognizer -f reCOGnizer/cicd/proteomes.fasta -rd resources_directory --tax-file reCOGnizer/cicd/UPIMAPI_results.tsv --tax-col 'Taxonomic lineage IDs (SPECIES)' --protein-id-col qseqid --species-taxids --quiet --test-run"
+        run: docker run recognizer /bin/bash -c "recognizer -f reCOGnizer/cicd/genes.fasta -rd resources_directory --tax-file reCOGnizer/cicd/UPIMAPI_results.tsv --tax-col 'Taxonomic lineage IDs (SPECIES)' --protein-id-col qseqid --species-taxids --quiet --test-run"
 
   custom-database-annotation:
     runs-on: ubuntu-latest
@@ -73,4 +73,20 @@ jobs:
           docker load --input /tmp/recognizer.tar
           docker image ls -a
       - name: Custom database annotation
-        run: docker run recognizer /bin/bash -c "mkdir resources_directory; tar -xzf reCOGnizer/cicd/cdd.tar.gz -C resources_directory; makeprofiledb -in reCOGnizer/cicd/ci.pn -out resources_directory/db; recognizer -f reCOGnizer/cicd/proteomes.fasta -rd resources_directory --quiet -dbs resources_directory/db --custom-databases --test-run"
+        run: docker run recognizer /bin/bash -c "mkdir resources_directory; tar -xzf reCOGnizer/cicd/cdd.tar.gz -C resources_directory; makeprofiledb -in reCOGnizer/cicd/ci.pn -out resources_directory/db; recognizer -f reCOGnizer/cicd/genes.fasta -rd resources_directory --quiet -dbs resources_directory/db --custom-databases --test-run"
+
+  prebuilt-databases-annotation:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: recognizer
+          path: /tmp
+      - name: Load Docker image
+        run: |
+          docker load --input /tmp/recognizer.tar
+          docker image ls -a
+      - name: Pre-built databases annotation
+        run: docker run recognizer /bin/bash -c "recognizer -f reCOGnizer/cicd/genes.fasta --quiet -dbs COG,TIGRFAM --use-prebuilt-dbs --test-run"
