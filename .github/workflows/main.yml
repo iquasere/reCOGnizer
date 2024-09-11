@@ -73,20 +73,4 @@ jobs:
           docker load --input /tmp/recognizer.tar
           docker image ls -a
       - name: Custom database annotation
-        run: docker run recognizer /bin/bash -c "mkdir resources_directory; tar -xzf reCOGnizer/cicd/cdd.tar.gz -C resources_directory; makeprofiledb -in reCOGnizer/cicd/ci.pn -out resources_directory/db; recognizer -f reCOGnizer/cicd/genes.fasta -rd resources_directory --quiet -dbs resources_directory/db --custom-databases --test-run"
-
-  prebuilt-databases-annotation:
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: Download artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: recognizer
-          path: /tmp
-      - name: Load Docker image
-        run: |
-          docker load --input /tmp/recognizer.tar
-          docker image ls -a
-      - name: Pre-built databases annotation
-        run: docker run recognizer /bin/bash -c "recognizer -f reCOGnizer/cicd/genes.fasta --quiet -dbs COG,TIGRFAM --use-prebuilt-dbs --test-run"
+        run: docker run recognizer /bin/bash -c "mkdir resources_directory; tar -xzf reCOGnizer/cicd/cdd.tar.gz -C resources_directory; makeprofiledb -in reCOGnizer/cicd/ci.pn -out resources_directory/db; recognizer -f reCOGnizer/cicd/genes.fasta -rd resources_directory --quiet -dbs COG,TIGR --custom-databases --test-run"

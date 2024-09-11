@@ -28,9 +28,10 @@ __version__ = '1.11.0'
 
 print_commands = False  # for debugging purposes, can be changed with --debug parameter
 
-db_prefixes = {  # database name to tuple of (db prefix, smp prefix)
-    'CDD': ('Cdd', 'cd'), 'Pfam': ('Pfam', 'pfam'), 'NCBIfam': ('NF', 'NF'), 'ProteinClusters': ('Prk', 'PRK'),
-    'Smart': ('Smart', 'smart'), 'TIGRFAM': ('Tigr', 'TIGR'), 'COG': ('Cog', 'COG'), 'KOG': ('Kog', 'KOG')}
+prefixes = {            # database name (as in https://www.ncbi.nlm.nih.gov/Structure/bwrpsb/bwrpsb.cgi) to tuple of (PN name, smp prefixes)
+    'NCBI_Curated': ('Cdd_NCBI', ('cd', 'sd')), 'Pfam': ('Pfam', ('pfam')), 'SMART': ('Smart', ('smart')),
+    'KOG': ('Kog', ('KOG')), 'COG': ('Cog', ('COG')), 'PRK': ('Prk', ('CHL', 'MTH', 'NF', 'PHA', 'PLN', 'PRK', 'PTZ')),
+    'TIGR': ('Tigr', ('TIGR'))}
 
 
 def get_arguments():
@@ -49,17 +50,13 @@ def get_arguments():
         "-rd", "--resources-directory", default=os.path.expanduser('~/recognizer_resources'),
         help="Output directory for storing databases and other resources [~/recognizer_resources]")
     parser.add_argument(
-        "-dbs", "--databases", default="CDD,Pfam,NCBIfam,ProteinClusters,Smart,TIGRFAM,COG,KOG",
+        "-dbs", "--databases", default="NCBI_Curated,Pfam,SMART,KOG,COG,PRK,TIGR",
         help="Databases to include in functional annotation (comma-separated) "
-             "[CDD,Pfam,NCBIfam,ProteinClusters,Smart,TIGRFAM,COG,KOG]")
-    parser.add_argument(
-        "--use-prebuilt-dbs", action="store_true", default=False,
-        help="Bypass database formation and directly download databases from "
-             "https://ftp.ncbi.nih.gov/pub/mmdb/cdd/little_endian/")
+             "[NCBI_Curated,Pfam,SMART,KOG,COG,PRK,TIGR]")
     parser.add_argument(
         "--custom-databases", action="store_true", default=False,
         help="If databases inputted were NOT produced by reCOGnizer [False]. Default databases of reCOGnizer "
-             "(e.g., COG, TIGRFAM, ...) can't be used simultaneously with custom databases. Use together with the "
+             "(e.g., COG, TIGR, ...) can't be used simultaneously with custom databases. Use together with the "
              "'--databases' parameter.")
     parser.add_argument(
         "-mts", "--max-target-seqs", type=int, default=20,
@@ -119,7 +116,7 @@ def get_arguments():
     # If default databases, check if all are recognized. If using both default and custom, exit.
     if not args.custom_databases:
         for database in args.databases:
-            if database not in ["CDD", "Pfam", "NCBIfam", "ProteinClusters", "Smart", "TIGRFAM", "COG", "KOG"]:
+            if database not in prefixes.keys():
                 exit(f'Default database {database} not recognized. Exiting.')
     else:
         for database in args.databases:
@@ -191,16 +188,7 @@ def get_tabular_taxonomy(output):
     os.remove('taxonomy.rdf')
 
 
-def download_little_endian(directory, dbs=db_prefixes.keys()):
-    for db in dbs:
-        url = f"https://ftp.ncbi.nih.gov/pub/mmdb/cdd/little_endian/{db_prefixes[db][0]}_LE.tar.gz"
-        filename = url.split('/')[-1]
-        run_command(f'wget -P {directory} {url}')
-        run_command(f'tar -xzf {directory}/{filename} -C {directory}/dbs')
-        run_command(f'rm {directory}/{filename}')
-
-
-def download_resources(directory, quiet=False, test_run=False, download_le=False):
+def download_resources(directory, quiet=False, test_run=False):
     timestamp_file = f'{directory}/recognizer_dwnl.timestamp'
     if os.path.isfile(timestamp_file):
         with open(timestamp_file) as f:
@@ -248,9 +236,6 @@ def download_resources(directory, quiet=False, test_run=False, download_le=False
         if filename == 'cdd.tar.gz' and test_run:  # "test_run" allows CI/CD tests to run on GHA
             os.rename('reCOGnizer/cicd/cdd.tar.gz', f'{directory}/cdd.tar.gz')
             continue
-        if filename == 'cdd.tar.gz' and download_le:  # download prebuilt databases
-            download_little_endian(directory)
-            continue
         if os.path.isfile(f"{directory}/{filename}"):
             print(f"Removing {directory}/{filename}")
             os.remove(f"{directory}/{filename}")
@@ -261,11 +246,10 @@ def download_resources(directory, quiet=False, test_run=False, download_le=False
                 os.remove(f"{directory}/{filename}"[:-3])
             run_command(f'gunzip {directory}/{filename}', print_command=True)
 
-    # Extract the smps
-    if not download_le:
-        run_pipe_command(
-            f'{"gtar" if sys.platform == "darwin" else "tar"} -xzf {directory}/cdd.tar.gz --wildcards "{directory}/smps/*.smp"',
-            print_command=True)
+    # Extract the SMPs
+    run_pipe_command(
+        f'{"gtar" if sys.platform == "darwin" else "tar"} -xzf {directory}/cdd.tar.gz -C {directory}/smps',
+        print_command=True)
     #os.remove('cdd.tar.gz')  # no idea why I put it doing this, maybe to free space?
     get_tabular_taxonomy(f'{directory}/taxonomy.tsv')
 
@@ -339,8 +323,13 @@ def parse_blast(file):
     return pd.DataFrame(columns=blast_cols)
 
 
-def pn2database(pn):
-    run_command(f"makeprofiledb -in {pn} -title {pn.rstrip('.pn')} -out {pn.rstrip('.pn')} -max_smp_vol 1000000")
+def pn2database(pn, out_dir):
+    work_dir = os.getcwd()
+    os.chdir(os.path.dirname(pn))
+    pn_name = os.path.basename(pn).split('.pn')[0]
+    run_command(f"makeprofiledb -in {pn} -title {pn_name} -out {out_dir}/{pn_name} "
+                f"-max_smp_vol 1000000", print_command=True)
+    os.chdir(work_dir)
 
 
 def split(a, n):
@@ -404,7 +393,7 @@ def create_tax_db(smp_directory, db_directory, db_prefix, taxids, hmm_pgap):
         with open(f'{db_directory}/{db_prefix}_{taxid}.pn', 'w') as f:
             f.write('\n'.join([f'{file}.smp' for file in set(smp_list)]))
     for taxid in taxids:
-        pn2database(f'{db_directory}/{db_prefix}_{taxid}.pn')
+        pn2database(f'{smp_directory}/{db_prefix}_{taxid}.pn', db_directory)
         taxids_with_db.append(taxid)
     return taxids_with_db
 
@@ -641,7 +630,7 @@ def check_cog_tax_database(smp_directory, db_directory):
         with open(f'{db_directory}/{name}.pn', 'w') as f:
             f.write(smp)
         if not is_db_good(f'{db_directory}/{name}', print_warning=False):
-            pn2database(f'{db_directory}/{name}.pn')
+            pn2database(f'{smp_directory}/{name}.pn', db_directory)
 
 
 def cog_taxonomic_workflow(
@@ -684,13 +673,24 @@ def cog_taxonomic_workflow(
     db_report.to_csv(f'{output}/rpsbproc/COG_report.tsv', sep='\t')
 
 
+def list_smps(smp_directory, smps_prefixes):
+    if type(smps_prefixes) == str:
+        return glob(f'{smp_directory}/{smps_prefixes}*.smp')
+    smps = []
+    for prefix in smps_prefixes:
+        smps += glob(f'{smp_directory}/{prefix}*.smp')
+    return smps
+
+
 def validate_regular_database(smp_directory, db_directory, db_prefix, smps_prefix):
     if not is_db_good(f'{db_directory}/{db_prefix}'):
         print(f'Some part of {db_prefix} was not valid! Will rebuild!')
-        smp_list = glob(f'{smp_directory}/{smps_prefix}*.smp')
-        with open(f'{db_directory}/{db_prefix}.pn', 'w') as f:
-            f.write('\n'.join(smp_list))
-        pn2database(f'{db_directory}/{db_prefix}.pn')
+        if not os.path.isfile(f'{db_directory}/{db_prefix}.pn'):
+            print(f'No {db_prefix}.pn file found! Will create one!')
+            smp_list = list_smps(smp_directory, smps_prefix)
+            with open(f'{db_directory}/{db_prefix}.pn', 'w') as f:
+                f.write('\n'.join(smp_list))
+        pn2database(f'{smp_directory}/{db_prefix}.pn', db_directory)
     else:
         print(f'A valid {db_prefix} split database was found!')
 
@@ -899,18 +899,11 @@ def taxonomic_workflow(
     db_report.to_csv(f'{output}/rpsbproc/{base}_report.tsv', sep='\t')
 
 
-def multiprocess_workflow(
-        output, resources_directory, threads, db_prefixes, base, max_target_seqs=5, evalue=0.01,
-        use_prebuilt_dbs=False):
-    if use_prebuilt_dbs:
-        if base not in ['NCBIfam', 'Smart']:       # NCBIfam is not available at https://ftp.ncbi.nih.gov/pub/mmdb/cdd/little_endian/
-            validate_prebuilt_database(f'{resources_directory}/dbs', db_prefixes[base][0])
-    else:
-        validate_regular_database(f'{resources_directory}/smps', f'{resources_directory}/dbs', db_prefixes[base][0],
-                                  db_prefixes[base][1])
+def multiprocess_workflow(output, resources_directory, threads, db_prefixes, base, max_target_seqs=5, evalue=0.01):
+    validate_regular_database(
+        f'{resources_directory}/smps', f'{resources_directory}/dbs', db_prefixes[base][0],
+        db_prefixes[base][1])
 
-    if base in ['NCBIfam', 'Smart'] and use_prebuilt_dbs:
-        return      # NCBIfam is not available at https://ftp.ncbi.nih.gov/pub/mmdb/cdd/little_endian/
     # Run RPS-BLAST
     with Pool(processes=threads) as p:
         p.starmap(run_rpsblast, [(
@@ -942,11 +935,11 @@ def complete_report(report, db, resources_directory, output, hmm_pgap, fun):
     cols = ['qseqid', 'DB ID', 'product_name', 'DB description', 'ec_number', 'KO', 'CDD ID', 'taxonomic_range_name',
             'taxonomic_range', 'Superfamilies', 'Sites', 'Motifs', 'pident', 'length', 'mismatch', 'gapopen',
             'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore']
-    if db in ['CDD', 'Pfam', 'NCBIfam', 'ProteinClusters', 'TIGRFAM']:
+    if db in ['NCBI_Curated', 'Pfam', 'PRK', 'TIGR']:
         report = pd.merge(report, hmm_pgap, left_on='DB ID', right_on='source_identifier', how='left')
         if db == 'CDD':
             report['ec_number'] = report['DB description'].apply(get_db_ec, suffix=")")
-    elif db == 'Smart':
+    elif db == 'SMART':
         smart_table = pd.read_csv(
             f'{resources_directory}/descriptions.pl', sep='\t', skiprows=2, names=['DB ID', 'product_name'],
             usecols=[1, 2])
@@ -979,15 +972,13 @@ def complete_report(report, db, resources_directory, output, hmm_pgap, fun):
 
 def organize_results(
         file, output, resources_directory, databases, hmm_pgap, cddid, fun, no_output_sequences=False,
-        include_rpsbproc_cols=False, use_prebuilt_dbs=False):
+        include_rpsbproc_cols=False):
     timed_message("Organizing annotation results")
     i = 1
     xlsx_report = pd.ExcelWriter(f'{output}/reCOGnizer_results.xlsx', engine='xlsxwriter')
     all_reports = pd.DataFrame(columns=['qseqid',
                                         'DB ID'])  # intialize with these columns so if it has no rows, at least it has the columns to groupby
     for db in databases:
-        if db in ['NCBIfam', 'Smart'] and use_prebuilt_dbs:
-            continue
         run_pipe_command(f'cat {output}/blast/{db}_*_aligned.blast', file=f'{output}/blast/{db}_aligned.blast')
         print(f'[{i}/{len(databases)}] Handling {db} annotation')
         blast_res = parse_blast(f'{output}/blast/{db}_aligned.blast')
@@ -1015,8 +1006,7 @@ def organize_results(
 def main():
     args = get_arguments()
 
-    download_resources(
-        args.resources_directory, quiet=args.quiet, test_run=args.test_run, download_le=args.use_prebuilt_dbs)
+    download_resources(args.resources_directory, quiet=args.quiet, test_run=args.test_run)
 
     if not args.file:
         exit('No input file specified. Exiting.')
@@ -1046,11 +1036,11 @@ def main():
         else:
             tax_file = lineages = all_taxids = None
         for base in args.databases:
-            db_hmm_pgap = hmm_pgap[hmm_pgap['source_identifier'].str.startswith(db_prefixes[base][1])]
+            db_hmm_pgap = hmm_pgap[hmm_pgap['source_identifier'].str.startswith(prefixes[base][1])]
             timed_message(f'Running annotation with RPS-BLAST and {base} database as reference.')
             if args.tax_file is not None and base in ['Pfam', 'NCBIfam', 'ProteinClusters', 'TIGRFAM']:
                 taxonomic_workflow(
-                    args.output, args.resources_directory, args.threads, lineages, all_taxids, db_prefixes,
+                    args.output, args.resources_directory, args.threads, lineages, all_taxids, prefixes,
                     base, db_hmm_pgap, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
             elif base in ['COG'] and args.tax_file is not None and args.species_taxids:
                 cog_taxonomic_workflow(
@@ -1058,12 +1048,11 @@ def main():
                     max_target_seqs=args.max_target_seqs, evalue=args.evalue)
             else:
                 multiprocess_workflow(
-                    args.output, args.resources_directory, args.threads, db_prefixes, base,
-                    max_target_seqs=args.max_target_seqs, evalue=args.evalue, use_prebuilt_dbs=args.use_prebuilt_dbs)
+                    args.output, args.resources_directory, args.threads, prefixes, base,
+                    max_target_seqs=args.max_target_seqs, evalue=args.evalue)
         organize_results(
             args.file, args.output, args.resources_directory, args.databases, hmm_pgap, cddid, fun,
-            no_output_sequences=args.no_output_sequences, include_rpsbproc_cols=args.output_rpsbproc_cols,
-            use_prebuilt_dbs=args.use_prebuilt_dbs)
+            no_output_sequences=args.no_output_sequences, include_rpsbproc_cols=args.output_rpsbproc_cols)
         if not args.keep_intermediates:
             for directory in [f'{args.output}/{folder}' for folder in ['asn', 'blast', 'rpsbproc', 'tmp']]:
                 shutil.rmtree(directory)
