@@ -41,7 +41,7 @@ jobs:
           docker load --input /tmp/recognizer.tar
           docker image ls -a
       - name: Default annotation
-        run: docker run recognizer /bin/bash -c "recognizer -f reCOGnizer/cicd/genes.fasta -rd resources_directory --quiet -dbs COG,TIGRFAM --test-run"
+        run: docker run recognizer /bin/bash -c "recognizer -f reCOGnizer/cicd/genes.fasta -rd resources_directory --quiet -dbs COG,TIGR --test-run"
 
   taxonomy-based-annotation:
     runs-on: ubuntu-latest
@@ -73,4 +73,4 @@ jobs:
           docker load --input /tmp/recognizer.tar
           docker image ls -a
       - name: Custom database annotation
-        run: docker run recognizer /bin/bash -c "mkdir resources_directory; tar -xzf reCOGnizer/cicd/cdd.tar.gz -C resources_directory; makeprofiledb -in reCOGnizer/cicd/ci.pn -out resources_directory/db; recognizer -f reCOGnizer/cicd/genes.fasta -rd resources_directory --quiet -dbs COG,TIGR --custom-databases --test-run"
+        run: docker run recognizer /bin/bash -c "mkdir custom_dir; tar -xzf reCOGnizer/cicd/cdd.tar.gz -C custom_dir; makeprofiledb -in reCOGnizer/cicd/ci.pn -out custom_dir/db; recognizer -f reCOGnizer/cicd/genes.fasta -rd resources_directory --quiet -dbs resources_directory/db --custom-databases --test-run"
