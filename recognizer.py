@@ -685,10 +685,10 @@ def list_smps(smp_directory, smps_prefixes):
 def validate_regular_database(smp_directory, db_directory, db_prefix, smps_prefix):
     if not is_db_good(f'{db_directory}/{db_prefix}'):
         print(f'Some part of {db_prefix} was not valid! Will rebuild!')
-        if not os.path.isfile(f'{db_directory}/{db_prefix}.pn'):
-            print(f'No {db_prefix}.pn file found! Will create one!')
+        if not os.path.isfile(f'{smp_directory}/{db_prefix}.pn'):
+            print(f'No {smp_directory}/{db_prefix}.pn file found! Will create one!')
             smp_list = list_smps(smp_directory, smps_prefix)
-            with open(f'{db_directory}/{db_prefix}.pn', 'w') as f:
+            with open(f'{smp_directory}/{db_prefix}.pn', 'w') as f:
                 f.write('\n'.join(smp_list))
         pn2database(f'{smp_directory}/{db_prefix}.pn', db_directory)
     else:
