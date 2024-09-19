@@ -26,7 +26,7 @@ import re
 
 __version__ = '1.11.0'
 
-print_commands = False  # for debugging purposes, can be changed with --debug parameter
+print_commands = True  # for debugging purposes, can be changed with --debug parameter
 
 prefixes = {            # database name (as in https://www.ncbi.nlm.nih.gov/Structure/bwrpsb/bwrpsb.cgi) to tuple of (PN name, smp prefixes)
     'NCBI_Curated': ('Cdd_NCBI', ('cd', 'sd')), 'Pfam': ('Pfam', ('pfam')), 'SMART': ('Smart', ('smart')),
@@ -325,9 +325,10 @@ def parse_blast(file):
 
 def pn2database(pn, out_dir):
     work_dir = os.getcwd()
+    out_dir = os.path.abspath(out_dir)
     os.chdir(os.path.dirname(pn))
-    pn_name = os.path.basename(pn).split('.pn')[0]
-    run_command(f"makeprofiledb -in {pn} -title {pn_name} -out {out_dir}/{pn_name} "
+    pn_name = pn.split('/')[-1].split('.pn')[0]
+    run_command(f"makeprofiledb -in {pn_name}.pn -title {pn_name} -out {out_dir}/{pn_name} "
                 f"-max_smp_vol 1000000", print_command=True)
     os.chdir(work_dir)
 
@@ -744,6 +745,7 @@ def split_fasta_by_threads(file, output_basename, threads):
         with open(f'{output_basename}_{i}.fasta', 'w') as f:
             for key in keys[i]:
                 f.write(f'>{key}\n{fasta.loc[key, "sequence"]}\n')
+    timed_message(f'Finished splitting {file} into {threads} parts')
 
 
 def taxids_of_interest(tax_file, protein_id_col, tax_col, tax_df):
@@ -1020,7 +1022,7 @@ def main():
 
     # this splitting is always necessary, even with taxonomy inputted, since some databases don't have taxonomy-based
     # annotation. And it keeps things simpler.
-    split_fasta_by_threads(args.file, f'{args.output}/tmp/tmp', args.threads)
+    #split_fasta_by_threads(args.file, f'{args.output}/tmp/tmp', args.threads)
     if args.custom_databases:
         custom_database_workflow(
             args.output, args.databases, threads=args.threads, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
