@@ -140,7 +140,7 @@ def timed_message(message):
 
 def run_command(bash_command, print_command=print_commands, stdout=None, stderr=None):
     if print_command:
-        print(bash_command)
+        print(f'{bash_command}\n')
     run(bash_command.split(), stdout=stdout, stderr=stderr)
 
 
@@ -687,7 +687,7 @@ def validate_regular_database(smp_directory, db_directory, db_prefix, smps_prefi
         print(f'Some part of {db_prefix} was not valid! Will rebuild!')
         if not os.path.isfile(f'{smp_directory}/{db_prefix}.pn'):
             print(f'No {smp_directory}/{db_prefix}.pn file found! Will create one!')
-            smp_list = list_smps(smp_directory, smps_prefix)
+            smp_list = [smp_filename.split('/')[-1] for smp_filename in list_smps(smp_directory, smps_prefix)]
             with open(f'{smp_directory}/{db_prefix}.pn', 'w') as f:
                 f.write('\n'.join(smp_list))
         pn2database(f'{smp_directory}/{db_prefix}.pn', db_directory)
@@ -737,6 +737,7 @@ def replace_spaces_with_underscores(file, tmp_dir):
 
 
 def split_fasta_by_threads(file, output_basename, threads):
+    timed_message(f'Splitting {file} into {threads} parts')
     fasta = parse_fasta_on_memory(file)
     keys = list(split(fasta.index, threads))
     for i in range(threads):
