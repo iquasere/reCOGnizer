@@ -151,25 +151,25 @@ def human_time(seconds):
     return strftime("%Hh%Mm%Ss", gmtime(seconds))
 
 
-def run_pipe_command(bash_command, file='', mode='w', print_command=True):
+def run_pipe_command(bash_command, file='', mode='w', print_command=True, report_runtime=True):
     if print_command:
         print(f'{bash_command}{f" > {file}" if file != "" else ""}')
     if file == '':
         process = Popen(bash_command, stdin=PIPE, shell=True)
         process.communicate()
-        if process.returncode != 0:
+        if process.returncode != 0 and report_runtime:
             raise RuntimeError(f"Command '{bash_command}' failed with exit code {process.returncode}")
     elif file == 'PIPE':
         process = Popen(bash_command, stdin=PIPE, shell=True, stdout=PIPE)
         output = process.communicate()[0].decode('utf8')
-        if process.returncode != 0:
+        if process.returncode != 0 and report_runtime:
             raise RuntimeError(f"Command '{bash_command}' failed with exit code {process.returncode}")
         return output
     else:
         with open(file, mode) as output_file:
             process = Popen(bash_command, stdin=PIPE, shell=True, stdout=output_file)
             process.communicate()
-            if process.returncode != 0:
+            if process.returncode != 0 and report_runtime:
                 raise RuntimeError(f"Command '{bash_command}' failed with exit code {process.returncode}")
 
 
@@ -278,12 +278,12 @@ def str2bool(v):
         raise ArgumentTypeError('Boolean value expected.')
 
 
-def run_rpsblast(query, output, reference, threads='0', max_target_seqs=1, evalue=1e-2, outfmt=11):
+def run_rpsblast(query, output, reference, threads='0', max_target_seqs=1, evalue=1e-2, outfmt=11, report_runtime=True):
     # This run_command is different because of reference, which can't be split by space
     bash_command = (
         f'rpsblast -query {query} -db "{reference}" -out {output} -outfmt {outfmt} -num_threads {threads} '
         f'-max_target_seqs {max_target_seqs} -evalue {evalue}')
-    run_pipe_command(bash_command)
+    run_pipe_command(bash_command, report_runtime=report_runtime)
 
 
 def parse_cddid(cddid):
@@ -401,7 +401,7 @@ def create_tax_db(smp_directory, db_directory, db_prefix, taxids, hmm_pgap):
     for taxid in tqdm(taxids, desc=f'Organizing PN files for [{len(taxids)}] Tax IDs.', ascii=' >='):
         smp_list = [f'{smp_directory}/{source}' for source in hmm_pgap[hmm_pgap['taxonomic_range'] == taxid][
             'source_identifier']]
-        with open(f'{db_directory}/{db_prefix}_{taxid}.pn', 'w') as f:
+        with open(f'{smp_directory}/{db_prefix}_{taxid}.pn', 'w') as f:
             f.write('\n'.join([f'{file}.smp' for file in set(smp_list)]))
     for taxid in taxids:
         pn2database(f'{smp_directory}/{db_prefix}_{taxid}.pn', db_directory)
@@ -638,7 +638,7 @@ def check_cog_tax_database(smp_directory, db_directory):
     smps = glob(f'{smp_directory}/COG*.smp')
     for smp in tqdm(smps, desc=f'Checking split COG database for [{len(smps)}] COGs.', ascii=' >='):
         name = smp.split('/')[-1].split('.')[0]
-        with open(f'{db_directory}/{name}.pn', 'w') as f:
+        with open(f'{smp_directory}/{name}.pn', 'w') as f:
             f.write(smp)
         if not is_db_good(f'{db_directory}/{name}', print_warning=False):
             pn2database(f'{smp_directory}/{name}.pn', db_directory)
@@ -656,7 +656,7 @@ def cog_taxonomic_workflow(
             with Pool(processes=threads) as p:
                 p.starmap(run_rpsblast, [(
                     f'{output}/tmp/tmp_{taxid}_{i}.fasta', f'{output}/asn/COG_{taxid}_{i}_aligned.asn',
-                    f'{resources_directory}/dbs/COG', '1', max_target_seqs, evalue) for i in range(threads)
+                    f'{resources_directory}/dbs/COG', '1', max_target_seqs, evalue, False) for i in range(threads)
                     if os.path.isfile(f'{output}/tmp/tmp_{taxid}_{i}.fasta')])
         else:
             with Pool(processes=threads) as p:
@@ -891,7 +891,7 @@ def taxonomic_workflow(
             with Pool(processes=threads) as p:
                 p.starmap(run_rpsblast, [(
                     f'{output}/tmp/tmp_{taxid}_{i}.fasta', f'{output}/asn/{base}_{taxid}_{i}_aligned.asn',
-                    ' '.join(dbs[taxid]), '1', max_target_seqs, evalue) for i in range(threads)
+                    ' '.join(dbs[taxid]), '1', max_target_seqs, evalue, False) for i in range(threads)
                     if os.path.isfile(f'{output}/tmp/tmp_{taxid}_{i}.fasta')])
             # Convert ASN-11 to TAB-6
             with Pool(processes=threads) as p:
