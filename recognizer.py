@@ -117,7 +117,7 @@ def get_arguments():
     if not args.custom_databases:
         for database in args.databases:
             if database not in prefixes.keys():
-                exit(f'Default database {database} not recognized. Exiting.')
+                exit(f'Default database {database} not recognized. Must be one of {",".join(prefixes.keys())}. Exiting.')
     else:
         for database in args.databases:
             if database in ["CDD", "Pfam", "NCBIfam", "ProteinClusters", "Smart", "TIGRFAM", "COG", "KOG"]:
@@ -151,16 +151,26 @@ def human_time(seconds):
     return strftime("%Hh%Mm%Ss", gmtime(seconds))
 
 
-def run_pipe_command(bash_command, file='', mode='w', print_command=print_commands):
+def run_pipe_command(bash_command, file='', mode='w', print_command=True):
     if print_command:
         print(f'{bash_command}{f" > {file}" if file != "" else ""}')
     if file == '':
-        Popen(bash_command, stdin=PIPE, shell=True).communicate()
+        process = Popen(bash_command, stdin=PIPE, shell=True)
+        process.communicate()
+        if process.returncode != 0:
+            raise RuntimeError(f"Command '{bash_command}' failed with exit code {process.returncode}")
     elif file == 'PIPE':
-        return Popen(bash_command, stdin=PIPE, shell=True, stdout=PIPE).communicate()[0].decode('utf8')
+        process = Popen(bash_command, stdin=PIPE, shell=True, stdout=PIPE)
+        output = process.communicate()[0].decode('utf8')
+        if process.returncode != 0:
+            raise RuntimeError(f"Command '{bash_command}' failed with exit code {process.returncode}")
+        return output
     else:
         with open(file, mode) as output_file:
-            Popen(bash_command, stdin=PIPE, shell=True, stdout=output_file).communicate()
+            process = Popen(bash_command, stdin=PIPE, shell=True, stdout=output_file)
+            process.communicate()
+            if process.returncode != 0:
+                raise RuntimeError(f"Command '{bash_command}' failed with exit code {process.returncode}")
 
 
 def get_tabular_taxonomy(output):
@@ -1022,7 +1032,7 @@ def main():
 
     # this splitting is always necessary, even with taxonomy inputted, since some databases don't have taxonomy-based
     # annotation. And it keeps things simpler.
-    #split_fasta_by_threads(args.file, f'{args.output}/tmp/tmp', args.threads)
+    split_fasta_by_threads(args.file, f'{args.output}/tmp/tmp', args.threads)
     if args.custom_databases:
         custom_database_workflow(
             args.output, args.databases, threads=args.threads, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
