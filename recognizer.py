@@ -24,7 +24,7 @@ from requests import get as requests_get
 import xml.etree.ElementTree as ET
 import re
 
-__version__ = '1.11.0'
+__version__ = '1.11.1'
 
 print_commands = True  # for debugging purposes, can be changed with --debug parameter
 
@@ -174,7 +174,7 @@ def run_pipe_command(bash_command, file='', mode='w', print_command=True):
 
 
 def get_tabular_taxonomy(output):
-    res = requests_get('https://ftp.uniprot.org/pub/databases/uniprot/current_release/rdf/taxonomy.rdf.xz')
+    res = requests_get('https://ftp.expasy.org/databases/uniprot/current_release/rdf/taxonomy.rdf.xz')
     with open('taxonomy.rdf.xz', 'wb') as f:
         f.write(res.content)
     run_command(f'unxz taxonomy.rdf.xz')
