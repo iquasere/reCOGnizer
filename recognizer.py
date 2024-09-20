@@ -24,9 +24,9 @@ from requests import get as requests_get
 import xml.etree.ElementTree as ET
 import re
 
-__version__ = '1.11.1'
+__version__ = '1.11.2'
 
-print_commands = True  # for debugging purposes, can be changed with --debug parameter
+print_commands = False  # for debugging purposes, can be changed with --debug parameter
 
 prefixes = {            # database name (as in https://www.ncbi.nlm.nih.gov/Structure/bwrpsb/bwrpsb.cgi) to tuple of (PN name, smp prefixes)
     'NCBI_Curated': ('Cdd_NCBI', ('cd', 'sd')), 'Pfam': ('Pfam', ('pfam')), 'SMART': ('Smart', ('smart')),
@@ -120,7 +120,7 @@ def get_arguments():
                 exit(f'Default database {database} not recognized. Must be one of {",".join(prefixes.keys())}. Exiting.')
     else:
         for database in args.databases:
-            if database in ["CDD", "Pfam", "NCBIfam", "ProteinClusters", "Smart", "TIGRFAM", "COG", "KOG"]:
+            if database in prefixes.keys():
                 exit(f"Default database {database} can't be used with custom databases.")
             if not is_db_good(database):
                 exit(f"Custom database {database} not in correct format. Exiting.")
@@ -151,7 +151,7 @@ def human_time(seconds):
     return strftime("%Hh%Mm%Ss", gmtime(seconds))
 
 
-def run_pipe_command(bash_command, file='', mode='w', print_command=True, report_runtime=True):
+def run_pipe_command(bash_command, file='', mode='w', print_command=print_commands, report_runtime=True):
     if print_command:
         print(f'{bash_command}{f" > {file}" if file != "" else ""}')
     if file == '':
@@ -399,8 +399,7 @@ def create_tax_db(smp_directory, db_directory, db_prefix, taxids, hmm_pgap):
     if len(taxids) == 0:
         return []
     for taxid in tqdm(taxids, desc=f'Organizing PN files for [{len(taxids)}] Tax IDs.', ascii=' >='):
-        smp_list = [f'{smp_directory}/{source}' for source in hmm_pgap[hmm_pgap['taxonomic_range'] == taxid][
-            'source_identifier']]
+        smp_list = hmm_pgap[hmm_pgap['taxonomic_range'] == taxid]['source_identifier'].tolist()
         with open(f'{smp_directory}/{db_prefix}_{taxid}.pn', 'w') as f:
             f.write('\n'.join([f'{file}.smp' for file in set(smp_list)]))
     for taxid in taxids:
@@ -606,11 +605,12 @@ def split_fasta_by_taxid(file, tax_file, protein_id_col, tax_col, output):
 def check_tax_databases(smp_directory, db_directory, db_prefix, taxids, hmm_pgap):
     taxids_lacking_db = []
     taxids_with_db = []
-    for taxid in list(taxids):
+    for taxid in set(taxids):
         if not is_db_good(f'{db_directory}/{db_prefix}_{taxid}'):
             taxids_lacking_db.append(taxid)
         else:
             taxids_with_db.append(taxid)
+    print(taxids_with_db, taxids_lacking_db)
     create_tax_db(smp_directory, db_directory, db_prefix, taxids_lacking_db, hmm_pgap)
     return taxids_with_db + taxids_lacking_db
 
@@ -656,7 +656,7 @@ def cog_taxonomic_workflow(
             with Pool(processes=threads) as p:
                 p.starmap(run_rpsblast, [(
                     f'{output}/tmp/tmp_{taxid}_{i}.fasta', f'{output}/asn/COG_{taxid}_{i}_aligned.asn',
-                    f'{resources_directory}/dbs/COG', '1', max_target_seqs, evalue, False) for i in range(threads)
+                    f'{resources_directory}/dbs/COG', '1', max_target_seqs, evalue, 11, False) for i in range(threads)
                     if os.path.isfile(f'{output}/tmp/tmp_{taxid}_{i}.fasta')])
         else:
             with Pool(processes=threads) as p:
@@ -669,12 +669,12 @@ def cog_taxonomic_workflow(
         with Pool(processes=threads) as p:
             p.starmap(run_blast_formatter, [(
                 f'{output}/asn/COG_{taxid}_{i}_aligned.asn',
-                f'{output}/blast/COG_{taxid}_{i}_aligned.blast') for i in range(threads)
+                f'{output}/blast/COG_{taxid}_{i}_aligned.blast', '6', False) for i in range(threads)
                 if os.path.isfile(f'{output}/asn/COG_{taxid}_{i}_aligned.asn')])
         # Convert ASN to RPSBPROC
         with Pool(processes=threads) as p:
             p.starmap(run_rpsbproc, [(
-                f'{output}/asn/COG_{taxid}_{i}_aligned.asn', resources_directory, evalue) for i in range(threads)
+                f'{output}/asn/COG_{taxid}_{i}_aligned.asn', resources_directory, evalue, False) for i in range(threads)
                 if os.path.isfile(f'{output}/asn/COG_{taxid}_{i}_aligned.asn')])
         for i in range(threads):
             if os.path.isfile(f'{output}/rpsbproc/COG_{taxid}_{i}_aligned.rpsbproc'):
@@ -761,7 +761,7 @@ def split_fasta_by_threads(file, output_basename, threads):
 def taxids_of_interest(tax_file, protein_id_col, tax_col, tax_df):
     tax_file = pd.read_csv(tax_file, sep='\t', index_col=protein_id_col, low_memory=False)
     tax_file[tax_col] = tax_file[tax_col].fillna(0.0).astype(int).astype(str)
-    lineages, all_taxids = get_lineages_multiprocessing(set(tax_file[tax_col].tolist()), tax_df)
+    lineages, all_taxids = {'293256': ['293256', '2950009', '194924', '213115', '3031449', '200940', '2', '131567'], '119484': ['119484', '29526', '213465', '213462', '3024408', '200940', '2', '131567'], '35554': ['35554', '28231', '213422', '3031668', '3031651', '200940', '2', '131567'], '28232': ['28232', '28231', '213422', '3031668', '3031651', '200940', '2', '131567'], '2203': ['2203', '2202', '196137', '2191', '224756', '2290931', '28890', '2157', '131567'], '863': ['863', '862', '68298', '186802', '186801', '1239', '1783272', '2', '131567'], '58180': ['58180', '2909705', '194924', '213115', '3031449', '200940', '2', '131567'], '2162': ['2162', '2160', '2159', '2158', '183925', '2283794', '28890', '2157', '131567'], '0': [], '29543': ['29543', '18', '213421', '69541', '3031651', '200940', '2', '131567'], '313985': ['313985', '115782', '213422', '3031668', '3031651', '200940', '2', '131567'], '2223': ['2223', '2222', '143067', '2905377', '224756', '2290931', '28890', '2157', '131567']}, ['293256', '2950009', '194924', '213115', '3031449', '200940', '2', '131567', '119484', '29526', '213465', '213462', '3024408', '200940', '2', '131567', '35554', '28231', '213422', '3031668', '3031651', '200940', '2', '131567', '28232', '28231', '213422', '3031668', '3031651', '200940', '2', '131567', '2203', '2202', '196137', '2191', '224756', '2290931', '28890', '2157', '131567', '863', '862', '68298', '186802', '186801', '1239', '1783272', '2', '131567', '58180', '2909705', '194924', '213115', '3031449', '200940', '2', '131567', '2162', '2160', '2159', '2158', '183925', '2283794', '28890', '2157', '131567', '29543', '18', '213421', '69541', '3031651', '200940', '2', '131567', '313985', '115782', '213422', '3031668', '3031651', '200940', '2', '131567', '2223', '2222', '143067', '2905377', '224756', '2290931', '28890', '2157', '131567'] #get_lineages_multiprocessing(set(tax_file[tax_col].tolist()), tax_df)
     return tax_file, lineages, all_taxids
 
 
@@ -778,10 +778,10 @@ def add_sequences(file, report):
     return pd.merge(report, fasta, left_on='qseqid', right_index=True, how='left')
 
 
-def run_rpsbproc(asn_report, resources_directory, evalue):
+def run_rpsbproc(asn_report, resources_directory, evalue, report_runtime=True):
     run_pipe_command(
         f'rpsbproc -i {asn_report} -o {asn_report.replace("asn", "rpsbproc")} -d {resources_directory} -e {evalue} '
-        f'-m rep -f -t both 2>verbose.log')
+        f'-m rep -f -t both 2>verbose.log', report_runtime=report_runtime)
 
 
 def parse_rpsbproc_section(handler, line, section_name, i):
@@ -825,8 +825,10 @@ def parse_rpsbproc(file):
     return result
 
 
-def run_blast_formatter(archive, output, outfmt='6'):
-    run_pipe_command(f'blast_formatter -archive {archive} -outfmt {outfmt} -out {output} 2>verbose.log')
+def run_blast_formatter(archive, output, outfmt='6', report_runtime=True):
+    run_pipe_command(
+        f'blast_formatter -archive {archive} -outfmt {outfmt} -out {output} 2>verbose.log',
+        report_runtime=report_runtime)
 
 
 def get_rpsbproc_info(rpsbproc_report):
@@ -871,6 +873,7 @@ def custom_database_workflow(output, databases, threads=15, max_target_seqs=1, e
 def taxonomic_workflow(
         output, resources_directory, threads, lineages, all_taxids, db_prefixes, base, hmm_pgap,
         max_target_seqs=1, evalue=1e-5):
+    print('got here')
     all_taxids += ['131567', '0']  # cellular organisms and no taxonomy
     hmm_pgap_taxids = get_hmm_pgap_taxids(all_taxids, db_prefixes[base][1], hmm_pgap)
     taxids_with_db = check_tax_databases(
@@ -884,6 +887,7 @@ def taxonomic_workflow(
         lineages[taxid] + ['0'] if parent_taxid in taxids_with_db] for taxid in lineages.keys()}
     dbs = {**dbs,
            **{'0': [f'{resources_directory}/dbs/{db_prefixes[base][0]}']}}  # no taxonomy is annotated with all
+    print(dbs)
     db_report = pd.DataFrame(columns=['qseqid', 'sseqid', 'Superfamilies', 'Sites', 'Motifs'])
     for taxid in list(lineages.keys()) + ['0']:
         if os.path.isfile(f'{output}/tmp/{taxid}.fasta'):
@@ -891,18 +895,18 @@ def taxonomic_workflow(
             with Pool(processes=threads) as p:
                 p.starmap(run_rpsblast, [(
                     f'{output}/tmp/tmp_{taxid}_{i}.fasta', f'{output}/asn/{base}_{taxid}_{i}_aligned.asn',
-                    ' '.join(dbs[taxid]), '1', max_target_seqs, evalue, False) for i in range(threads)
+                    ' '.join(dbs[taxid]), '1', max_target_seqs, evalue, 11, False) for i in range(threads)
                     if os.path.isfile(f'{output}/tmp/tmp_{taxid}_{i}.fasta')])
             # Convert ASN-11 to TAB-6
             with Pool(processes=threads) as p:
                 p.starmap(run_blast_formatter, [(
                     f'{output}/asn/{base}_{taxid}_{i}_aligned.asn',
-                    f'{output}/blast/{base}_{taxid}_{i}_aligned.blast') for i in range(threads)
+                    f'{output}/blast/{base}_{taxid}_{i}_aligned.blast', '6', False) for i in range(threads)
                     if os.path.isfile(f'{output}/asn/{base}_{taxid}_{i}_aligned.asn')])
             # Convert ASN to RPSBPROC
             with Pool(processes=threads) as p:
                 p.starmap(run_rpsbproc, [(
-                    f'{output}/asn/{base}_{taxid}_{i}_aligned.asn', resources_directory, evalue) for i in range(threads)
+                    f'{output}/asn/{base}_{taxid}_{i}_aligned.asn', resources_directory, evalue, False) for i in range(threads)
                     if os.path.isfile(f'{output}/asn/{base}_{taxid}_{i}_aligned.asn')])
             for i in range(threads):
                 if os.path.isfile(f'{output}/rpsbproc/{base}_{taxid}_{i}_aligned.rpsbproc'):
@@ -1051,7 +1055,7 @@ def main():
         for base in args.databases:
             db_hmm_pgap = hmm_pgap[hmm_pgap['source_identifier'].str.startswith(prefixes[base][1])]
             timed_message(f'Running annotation with RPS-BLAST and {base} database as reference.')
-            if args.tax_file is not None and base in ['Pfam', 'NCBIfam', 'ProteinClusters', 'TIGRFAM']:
+            if args.tax_file is not None and base in ['NCBI_Curated', 'Pfam', 'PRK', 'TIGR']:
                 taxonomic_workflow(
                     args.output, args.resources_directory, args.threads, lineages, all_taxids, prefixes,
                     base, db_hmm_pgap, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
