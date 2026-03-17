@@ -24,7 +24,7 @@ from requests import get as requests_get
 import xml.etree.ElementTree as ET
 import re
 
-__version__ = '1.11.2'
+__version__ = '1.12.0'
 
 print_commands = False  # for debugging purposes, can be changed with --debug parameter
 
@@ -226,11 +226,11 @@ def download_resources(directory, quiet=False, test_run=False):
         'https://ftp.ncbi.nih.gov/pub/mmdb/cdd/cdtrack.txt',
         'https://ftp.ncbi.nih.gov/pub/mmdb/cdd/family_superfamily_links',
         # COG categories
-        'ftp.ncbi.nlm.nih.gov/pub/COG/COG2020/data/fun-20.tab',
-        'ftp.ncbi.nlm.nih.gov/pub/COG/COG2020/data/cog-20.def.tab',
+        'https://ftp.ncbi.nlm.nih.gov/pub/COG/COG2020/data/fun-20.tab',
+        'https://ftp.ncbi.nlm.nih.gov/pub/COG/COG2020/data/cog-20.def.tab',
         # COG2EC
-        'http://eggnogdb.embl.de/download/eggnog_4.5/eggnog4.protein_id_conversion.tsv.gz',
-        'http://eggnogdb.embl.de/download/eggnog_4.5/data/NOG/NOG.members.tsv.gz',
+        'http://eggnog6.embl.de/download/eggnog_4.5/eggnog4.protein_id_conversion.tsv.gz',
+        'http://eggnog6.embl.de/download/eggnog_4.5/data/NOG/NOG.members.tsv.gz',
         # COG2KO
         'https://stringdb-static.org/download/COG.mappings.v11.0.txt.gz',
         'https://stringdb-static.org/download/protein.info.v11.0.txt.gz',
