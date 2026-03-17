@@ -59,7 +59,7 @@ def get_arguments():
              "(e.g., COG, TIGR, ...) can't be used simultaneously with custom databases. Use together with the "
              "'--databases' parameter.")
     parser.add_argument(
-        "-mts", "--max-target-seqs", type=int, default=20,
+        "-mts", "--max-target-seqs", type=int, default=1,
         help="Number of maximum identifications for each protein [1]")
     parser.add_argument(
         "--keep-spaces", action="store_true", default=False,
@@ -633,6 +633,14 @@ def get_members_df(resources_directory):
     return members_df
 
 
+def get_number_of_valid_fastas(input_fasta, threads):
+    """
+    To check if number of sequences in FASTA is less than number of threads -> otherwise will try to run rpsblast et al with empty queries
+    Returns the number of valid FASTA files
+    """
+    return min(int(check_output(f"grep -c '>' {input_fasta}", shell=True).decode().rstrip('\n')), threads)
+
+
 def check_cog_tax_database(smp_directory, db_directory):
     smps = glob(f'{smp_directory}/COG*.smp')
     for smp in tqdm(smps, desc=f'Checking split COG database for [{len(smps)}] COGs.', ascii=' >='):
@@ -644,7 +652,7 @@ def check_cog_tax_database(smp_directory, db_directory):
 
 
 def cog_taxonomic_workflow(
-        output, resources_directory, threads, tax_file, tax_col, members_df, max_target_seqs=1, evalue=1e-5):
+        output, resources_directory, n_fastas, tax_file, tax_col, members_df, max_target_seqs=1, evalue=1e-5):
     check_cog_tax_database(f'{resources_directory}/smps', f'{resources_directory}/dbs')  # for proteins with no taxonomy
     members_df.index = members_df.index.astype(str)
     members_taxids = members_df.index.tolist()
@@ -652,30 +660,30 @@ def cog_taxonomic_workflow(
     for taxid in set(tax_file[tax_col].tolist()):
         # Run RPS-BLAST
         if taxid not in members_taxids:
-            with Pool(processes=threads) as p:
+            with Pool(processes=n_fastas) as p:
                 p.starmap(run_rpsblast, [(
                     f'{output}/tmp/tmp_{taxid}_{i}.fasta', f'{output}/asn/COG_{taxid}_{i}_aligned.asn',
-                    f'{resources_directory}/dbs/COG', '1', max_target_seqs, evalue, 11, False) for i in range(threads)
+                    f'{resources_directory}/dbs/COG', '1', max_target_seqs, evalue, 11, False) for i in range(n_fastas)
                     if os.path.isfile(f'{output}/tmp/tmp_{taxid}_{i}.fasta')])
         else:
-            with Pool(processes=threads) as p:
+            with Pool(processes=n_fastas) as p:
                 p.starmap(run_rpsblast, [(
                     f'{output}/tmp/tmp_{taxid}_{i}.fasta', f'{output}/asn/COG_{taxid}_{i}_aligned.asn',
                     ' '.join([f'{resources_directory}/{cog}' for cog in members_df.loc[taxid]['cogs']]), '1',
-                    max_target_seqs, evalue) for i in range(threads)
+                    max_target_seqs, evalue) for i in range(n_fastas)
                     if os.path.isfile(f'{output}/tmp/tmp_{taxid}_{i}.fasta')])
         # Convert ASN-11 to TAB-6
-        with Pool(processes=threads) as p:
+        with Pool(processes=n_fastas) as p:
             p.starmap(run_blast_formatter, [(
                 f'{output}/asn/COG_{taxid}_{i}_aligned.asn',
-                f'{output}/blast/COG_{taxid}_{i}_aligned.blast', '6', False) for i in range(threads)
+                f'{output}/blast/COG_{taxid}_{i}_aligned.blast', '6', False) for i in range(n_fastas)
                 if os.path.isfile(f'{output}/asn/COG_{taxid}_{i}_aligned.asn')])
         # Convert ASN to RPSBPROC
-        with Pool(processes=threads) as p:
+        with Pool(processes=n_fastas) as p:
             p.starmap(run_rpsbproc, [(
-                f'{output}/asn/COG_{taxid}_{i}_aligned.asn', resources_directory, evalue, False) for i in range(threads)
+                f'{output}/asn/COG_{taxid}_{i}_aligned.asn', resources_directory, evalue, False) for i in range(n_fastas)
                 if os.path.isfile(f'{output}/asn/COG_{taxid}_{i}_aligned.asn')])
-        for i in range(threads):
+        for i in range(n_fastas):
             if os.path.isfile(f'{output}/rpsbproc/COG_{taxid}_{i}_aligned.rpsbproc'):
                 rpsbproc_report = get_rpsbproc_info(f'{output}/rpsbproc/COG_{taxid}_{i}_aligned.rpsbproc')
                 if len(rpsbproc_report) > 0:
@@ -846,6 +854,8 @@ def get_rpsbproc_info(rpsbproc_report):
 
 
 def get_db_ec(description, suffix=''):
+    if type(description) == float:
+        return np.nan
     m = re.compile(r"EC:([1-6-]\.[\d-]+\.[\d-]+\.[\d-]+)" + re.escape(suffix)).search(description)
     if m is None:
         return np.nan
@@ -870,7 +880,7 @@ def custom_database_workflow(output, databases, threads=15, max_target_seqs=1, e
 
 
 def taxonomic_workflow(
-        output, resources_directory, threads, lineages, all_taxids, db_prefixes, base, hmm_pgap,
+        output, resources_directory, n_fastas, lineages, all_taxids, db_prefixes, base, hmm_pgap,
         max_target_seqs=1, evalue=1e-5):
     all_taxids += ['131567', '0']  # cellular organisms and no taxonomy
     hmm_pgap_taxids = get_hmm_pgap_taxids(all_taxids, db_prefixes[base][1], hmm_pgap)
@@ -889,23 +899,23 @@ def taxonomic_workflow(
     for taxid in list(lineages.keys()) + ['0']:
         if os.path.isfile(f'{output}/tmp/{taxid}.fasta'):
             # Run RPS-BLAST
-            with Pool(processes=threads) as p:
+            with Pool(processes=n_fastas) as p:
                 p.starmap(run_rpsblast, [(
                     f'{output}/tmp/tmp_{taxid}_{i}.fasta', f'{output}/asn/{base}_{taxid}_{i}_aligned.asn',
-                    ' '.join(dbs[taxid]), '1', max_target_seqs, evalue, 11, False) for i in range(threads)
+                    ' '.join(dbs[taxid]), '1', max_target_seqs, evalue, 11, False) for i in range(n_fastas)
                     if os.path.isfile(f'{output}/tmp/tmp_{taxid}_{i}.fasta')])
             # Convert ASN-11 to TAB-6
-            with Pool(processes=threads) as p:
+            with Pool(processes=n_fastas) as p:
                 p.starmap(run_blast_formatter, [(
                     f'{output}/asn/{base}_{taxid}_{i}_aligned.asn',
-                    f'{output}/blast/{base}_{taxid}_{i}_aligned.blast', '6', False) for i in range(threads)
+                    f'{output}/blast/{base}_{taxid}_{i}_aligned.blast', '6', False) for i in range(n_fastas)
                     if os.path.isfile(f'{output}/asn/{base}_{taxid}_{i}_aligned.asn')])
             # Convert ASN to RPSBPROC
-            with Pool(processes=threads) as p:
+            with Pool(processes=n_fastas) as p:
                 p.starmap(run_rpsbproc, [(
-                    f'{output}/asn/{base}_{taxid}_{i}_aligned.asn', resources_directory, evalue, False) for i in range(threads)
+                    f'{output}/asn/{base}_{taxid}_{i}_aligned.asn', resources_directory, evalue, False) for i in range(n_fastas)
                     if os.path.isfile(f'{output}/asn/{base}_{taxid}_{i}_aligned.asn')])
-            for i in range(threads):
+            for i in range(n_fastas):
                 if os.path.isfile(f'{output}/rpsbproc/{base}_{taxid}_{i}_aligned.rpsbproc'):
                     rpsbproc_report = get_rpsbproc_info(f'{output}/rpsbproc/{base}_{taxid}_{i}_aligned.rpsbproc')
                     if len(rpsbproc_report) > 0:
@@ -913,31 +923,31 @@ def taxonomic_workflow(
     db_report.to_csv(f'{output}/rpsbproc/{base}_report.tsv', sep='\t')
 
 
-def multiprocess_workflow(output, resources_directory, threads, db_prefixes, base, max_target_seqs=5, evalue=0.01):
+def multiprocess_workflow(output, resources_directory, n_fastas, db_prefixes, base, max_target_seqs=5, evalue=0.01):
     validate_regular_database(
         f'{resources_directory}/smps', f'{resources_directory}/dbs', db_prefixes[base][0],
         db_prefixes[base][1])
 
     # Run RPS-BLAST
-    with Pool(processes=threads) as p:
+    with Pool(processes=n_fastas) as p:
         p.starmap(run_rpsblast, [(
             f'{output}/tmp/tmp_{i}.fasta', f'{output}/asn/{base}_{i}_aligned.asn',
             f'{resources_directory}/dbs/{db_prefixes[base][0]}', '1',
-            max_target_seqs, evalue) for i in range(threads)])
+            max_target_seqs, evalue) for i in range(n_fastas)])
     # Convert ASN-11 to TAB-6
-    with Pool(processes=threads) as p:
+    with Pool(processes=n_fastas) as p:
         p.starmap(run_blast_formatter, [(
             f'{output}/asn/{base}_{i}_aligned.asn',
-            f'{output}/blast/{base}_{i}_aligned.blast') for i in range(threads)
+            f'{output}/blast/{base}_{i}_aligned.blast') for i in range(n_fastas)
             if os.path.isfile(f'{output}/asn/{base}_{i}_aligned.asn')])
     run_pipe_command(f'cat {output}/blast/{base}_*_aligned.blast', file=f'{output}/blast/{base}_aligned.blast')
     # Convert ASN to RPSBPROC
-    with Pool(processes=threads) as p:
+    with Pool(processes=n_fastas) as p:
         p.starmap(run_rpsbproc, [(
-            f'{output}/asn/{base}_{i}_aligned.asn', resources_directory, evalue) for i in range(threads)
+            f'{output}/asn/{base}_{i}_aligned.asn', resources_directory, evalue) for i in range(n_fastas)
             if os.path.isfile(f'{output}/asn/{base}_{i}_aligned.asn')])
     db_report = pd.DataFrame(columns=['qseqid', 'sseqid', 'Superfamilies', 'Sites', 'Motifs'])
-    for i in range(threads):
+    for i in range(n_fastas):
         if os.path.isfile(f'{output}/rpsbproc/{base}_{i}_aligned.rpsbproc'):
             rpsbproc_report = get_rpsbproc_info(f'{output}/rpsbproc/{base}_{i}_aligned.rpsbproc')
             if len(rpsbproc_report) > 0:
@@ -949,6 +959,7 @@ def complete_report(report, db, resources_directory, output, hmm_pgap, fun):
     cols = ['qseqid', 'DB ID', 'product_name', 'DB description', 'ec_number', 'KO', 'CDD ID', 'taxonomic_range_name',
             'taxonomic_range', 'Superfamilies', 'Sites', 'Motifs', 'pident', 'length', 'mismatch', 'gapopen',
             'qstart', 'qend', 'sstart', 'send', 'evalue', 'bitscore']
+    report.to_csv('report.tsv', sep='\t')
     if db in ['NCBI_Curated', 'Pfam', 'PRK', 'TIGR']:
         report = pd.merge(report, hmm_pgap, left_on='DB ID', right_on='source_identifier', how='left')
         if db == 'CDD':
@@ -1031,9 +1042,12 @@ def main():
     if not args.keep_spaces:  # if alters input file, internally alters args.file
         args.file = replace_spaces_with_underscores(args.file, f'{args.output}/tmp')
 
-    # this splitting is always necessary, even with taxonomy inputted, since some databases don't have taxonomy-based
-    # annotation. And it keeps things simpler.
+    # this splitting is always necessary, even with taxonomy inputted, since some databases don't have taxonomy-based annotation.
+    # And it keeps things simpler.
     split_fasta_by_threads(args.file, f'{args.output}/tmp/tmp', args.threads)
+    # Calculating number of valid fastas prevents running empty queries for rpsblast et al
+    n_fastas = get_number_of_valid_fastas(args.file, args.threads)
+
     if args.custom_databases:
         custom_database_workflow(
             args.output, args.databases, threads=args.threads, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
@@ -1054,15 +1068,15 @@ def main():
             timed_message(f'Running annotation with RPS-BLAST and {base} database as reference.')
             if args.tax_file is not None and base in ['NCBI_Curated', 'Pfam', 'PRK', 'TIGR']:
                 taxonomic_workflow(
-                    args.output, args.resources_directory, args.threads, lineages, all_taxids, prefixes,
+                    args.output, args.resources_directory, n_fastas, lineages, all_taxids, prefixes,
                     base, db_hmm_pgap, max_target_seqs=args.max_target_seqs, evalue=args.evalue)
             elif base in ['COG'] and args.tax_file is not None and args.species_taxids:
                 cog_taxonomic_workflow(
-                    args.output, args.resources_directory, args.threads, tax_file, args.tax_col, members_df,
+                    args.output, args.resources_directory, n_fastas, tax_file, args.tax_col, members_df,
                     max_target_seqs=args.max_target_seqs, evalue=args.evalue)
             else:
                 multiprocess_workflow(
-                    args.output, args.resources_directory, args.threads, prefixes, base,
+                    args.output, args.resources_directory, n_fastas, prefixes, base,
                     max_target_seqs=args.max_target_seqs, evalue=args.evalue)
         organize_results(
             args.file, args.output, args.resources_directory, args.databases, hmm_pgap, cddid, fun,
