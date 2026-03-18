@@ -59,8 +59,8 @@ def get_arguments():
              "(e.g., COG, TIGR, ...) can't be used simultaneously with custom databases. Use together with the "
              "'--databases' parameter.")
     parser.add_argument(
-        "-mts", "--max-target-seqs", type=int, default=1,
-        help="Number of maximum identifications for each protein [1]")
+        "-mts", "--max-target-seqs", type=int, default=5,
+        help="Number of maximum identifications for each protein [5]")
     parser.add_argument(
         "--keep-spaces", action="store_true", default=False,
         help="BLAST ignores sequences IDs after the first space. "
@@ -334,6 +334,7 @@ def parse_blast(file):
 
 
 def pn2database(pn, out_dir):
+    # Changing dir because I don't want to clutter up the PN files with SMP filenames (no path looks much simpler) 
     work_dir = os.getcwd()
     out_dir = os.path.abspath(out_dir)
     os.chdir(os.path.dirname(pn))
@@ -374,7 +375,7 @@ def get_lineages(taxids, taxonomy_df):
 
 
 def get_lineages_multiprocessing(taxids, taxonomy_df, threads=14):
-    timed_message(f'Listing all parent tax IDs for {len(taxids)} tax IDs using {threads} threads')
+    timed_message(f'Listing all parent taxa for {len(taxids)} tax IDs')
     taxids_groups = split(list(taxids), threads)
     lineages, res_taxids = ({}, [])
     with Manager() as m:
@@ -582,8 +583,12 @@ def parse_fasta_on_memory(file):
 
 
 def write_fasta(data, output, protein_id_col):
-    data[protein_id_col] = data[protein_id_col].apply(lambda x: f'>{x}')
-    data.to_csv(output, sep='\n', header=False, index=False)
+    with open(output, "w") as f:
+        for pid, seq in zip(data[protein_id_col].values, data['sequence'].values):
+            f.write(f">{pid}")
+            f.write("\n")
+            f.write(seq)
+            f.write("\n")
 
 
 def split_fasta_by_taxid(file, tax_file, protein_id_col, tax_col, output):
@@ -755,20 +760,20 @@ def replace_spaces_with_underscores(file, tmp_dir):
 
 
 def split_fasta_by_threads(file, output_basename, threads):
-    timed_message(f'Splitting {file} into {threads} parts')
+    timed_message(f'Splitting {file}')
     fasta = parse_fasta_on_memory(file)
     keys = list(split(fasta.index, threads))
     for i in range(threads):
         with open(f'{output_basename}_{i}.fasta', 'w') as f:
             for key in keys[i]:
                 f.write(f'>{key}\n{fasta.loc[key, "sequence"]}\n')
-    timed_message(f'Finished splitting {file} into {threads} parts')
+    timed_message(f'Finished splitting {file}')
 
 
-def taxids_of_interest(tax_file, protein_id_col, tax_col, tax_df):
+def taxids_of_interest(tax_file, protein_id_col, tax_col, tax_df, threads=14):
     tax_file = pd.read_csv(tax_file, sep='\t', index_col=protein_id_col, low_memory=False)
     tax_file[tax_col] = tax_file[tax_col].fillna(0.0).astype(int).astype(str)
-    lineages, all_taxids = get_lineages_multiprocessing(set(tax_file[tax_col].tolist()), tax_df)
+    lineages, all_taxids = get_lineages_multiprocessing(set(tax_file[tax_col].tolist()), tax_df, threads=threads)
     return tax_file, lineages, all_taxids
 
 
@@ -1004,8 +1009,12 @@ def organize_results(
     all_reports = pd.DataFrame(columns=['qseqid',
                                         'DB ID'])  # intialize with these columns so if it has no rows, at least it has the columns to groupby
     for db in databases:
-        run_pipe_command(f'cat {output}/blast/{db}_*_aligned.blast', file=f'{output}/blast/{db}_aligned.blast')
         print(f'[{i}/{len(databases)}] Handling {db} annotation')
+        try:
+            check_output(f'ls {output}/blast/{db}_*_aligned.blast')
+        except:             # no results
+            continue
+        run_pipe_command(f'cat {output}/blast/{db}_*_aligned.blast', file=f'{output}/blast/{db}_aligned.blast')
         blast_res = parse_blast(f'{output}/blast/{db}_aligned.blast')
         if db != 'KOG':  # rpsbproc doesn't work with KOG
             rpsbproc_res = pd.read_csv(f'{output}/rpsbproc/{db}_report.tsv', sep='\t', index_col=0)
@@ -1054,7 +1063,7 @@ def main():
     else:
         if args.tax_file is not None:
             tax_file, lineages, all_taxids = taxids_of_interest(
-                args.tax_file, args.protein_id_col, args.tax_col, taxonomy_df)
+                args.tax_file, args.protein_id_col, args.tax_col, taxonomy_df, threads=args.threads)
             split_fasta_by_taxid(args.file, tax_file, args.protein_id_col, args.tax_col, args.output)
             # split FASTA for multiprocessing
             for taxid in tqdm(lineages.keys(), desc=timed_message('Splitting FASTAs'), ascii=' >='):
